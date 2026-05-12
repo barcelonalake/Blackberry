@@ -22,7 +22,7 @@ import {
   UserRound,
   Workflow,
 } from 'lucide-react';
-import type { Memory, Message, Session, Task, WorkspaceState } from './domain/types';
+import type { Artifact, Memory, Message, Session, Task, WorkspaceState } from './domain/types';
 import { createWorkspaceRuntime } from './data/workspaceRepositoryFactory';
 import { createAuthRuntime, type AuthBootstrapSession } from './auth/authBootstrap';
 import { initialState } from './data/initialState';
@@ -41,6 +41,15 @@ const runtime = createWorkspaceRuntime({
 const authRuntime = createAuthRuntime({ env, storage: window.localStorage });
 const repository = runtime.repository;
 const gateway = new AIGatewayClient();
+
+const APP_VERSION = 'v0.2.1';
+const ROADMAP_URL = 'https://barcelonalake.github.io/hosthtml/artifacts/ai-workspace-roadmap.html';
+const roadmapVersions = [
+  { version: 'v0.1', label: 'HTML Prototype', status: 'done', detail: '資訊架構與三欄視覺已驗證。' },
+  { version: 'v0.2', label: 'Web MVP', status: 'active', detail: 'PWA、local persistence、Auth bootstrap、Artifact 版本化。' },
+  { version: 'v0.3', label: 'Multi-model Agent', status: 'next', detail: 'AI Gateway、provider adapter、agent run queue。' },
+  { version: 'v1.0', label: 'Native + Web Stable', status: 'later', detail: 'SwiftUI 原生端與穩定同步。' },
+] as const;
 
 function nowLabel() {
   return new Date().toLocaleTimeString('zh-Hant', { hour: '2-digit', minute: '2-digit' });
@@ -192,6 +201,22 @@ function App() {
     persist({ ...state, tasks: [nextTask, ...state.tasks] });
   }
 
+  function createArtifactFromSession() {
+    if (!activeSession) return;
+    const sourceMessage = [...messages].reverse().find((message) => message.content.trim());
+    const nextVersion = Math.max(0, ...sessionArtifacts.map((artifact) => artifact.version)) + 1;
+    const content = sourceMessage?.content.trim() || activeSession.summary;
+    const nextArtifact: Artifact = {
+      id: `a${Date.now()}`,
+      sessionId: activeSession.id,
+      title: `${activeSession.title} · ${APP_VERSION} artifact`,
+      kind: 'markdown',
+      version: nextVersion,
+      content,
+    };
+    persist({ ...state, artifacts: [nextArtifact, ...state.artifacts] });
+  }
+
   function addMemoryFromSession() {
     if (!activeSession) return;
     const nextMemory: Memory = { id: `mem${Date.now()}`, title: activeSession.title, content: activeSession.summary, scope: 'workspace', active: true };
@@ -216,7 +241,7 @@ function App() {
     <main className="workspace-shell">
       <header className="topbar">
         <div>
-          <div className="eyebrow"><Sparkles size={14} /> AI Workspace OS · v0.1</div>
+          <div className="eyebrow"><Sparkles size={14} /> AI Workspace OS · {APP_VERSION}</div>
           <h1>Blackberry</h1>
           <p>Discord-like AI 工作空間：Session、Artifact、Memory、Task Board 在手機上形成閉環。</p>
         </div>
@@ -240,6 +265,25 @@ function App() {
           <small>{authSession?.membership.role ?? 'member'} · {authSession?.workspace.slug ?? 'no-slug'}</small>
         </div>
         <button className="ghost compact" onClick={resetAuthIdentity} disabled={authStatus === 'loading'}>Refresh identity</button>
+      </section>
+
+      <section className="roadmap-card">
+        <div className="roadmap-head">
+          <div>
+            <div className="panel-title"><Rocket size={18} /> Version roadmap</div>
+            <p>參考 roadmap：目前標注為 <b>{APP_VERSION}</b>，屬於 v0.2 Web MVP 階段。</p>
+          </div>
+          <a href={ROADMAP_URL} target="_blank" rel="noreferrer">Open roadmap</a>
+        </div>
+        <div className="roadmap-strip">
+          {roadmapVersions.map((item) => (
+            <article className={`version-card ${item.status}`} key={item.version}>
+              <span>{item.version}</span>
+              <b>{item.label}</b>
+              <small>{item.detail}</small>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="metrics">
@@ -287,6 +331,7 @@ function App() {
               <p>{activeSession?.summary}</p>
             </div>
             <button onClick={addTaskFromSession} disabled={syncStatus === 'loading'}><Workflow size={16} /> Task</button>
+            <button onClick={createArtifactFromSession} disabled={syncStatus === 'loading'}><Archive size={16} /> Artifact v{Math.max(0, ...sessionArtifacts.map((artifact) => artifact.version)) + 1}</button>
           </div>
 
           <div className="messages">
@@ -309,6 +354,7 @@ function App() {
 
           <section>
             <h2><Archive size={16} /> Artifacts</h2>
+            <button className="ghost" onClick={createArtifactFromSession} disabled={syncStatus === 'loading'}><Plus size={14} /> Save artifact v{Math.max(0, ...sessionArtifacts.map((artifact) => artifact.version)) + 1}</button>
             {sessionArtifacts.map((artifact) => <article className="mini-card" key={artifact.id}><FileText size={15} /><b>{artifact.title}</b><small>{artifact.kind} · v{artifact.version}</small><p>{artifact.content}</p></article>)}
           </section>
 
@@ -331,7 +377,7 @@ function App() {
       </section>
 
       <footer>
-        <Rocket size={16} /> Next: apply Supabase migration and connect Auth once project env is available.
+        <Rocket size={16} /> {APP_VERSION}: Artifact 版本化已接入；Next: real AI Gateway SSE and provider adapter.
       </footer>
     </main>
   );
