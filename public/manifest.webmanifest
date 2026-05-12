@@ -1,0 +1,1 @@
+{"name":"Blackberry","short_name":"Blackberry","description":"手機主控的 AI 開發工作台 PWA","start_url":"/Blackberry/","scope":"/Blackberry/","display":"standalone","background_color":"#020617","theme_color":"#0f172a","icons":[{"src":"/Blackberry/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}
