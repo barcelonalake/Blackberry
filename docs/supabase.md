@@ -18,7 +18,9 @@ Never commit `.env.local`. Do not place `service_role` keys in Vite variables.
 
 - `LocalWorkspaceRepository`: active default, used by GitHub Pages preview.
 - `SupabaseWorkspaceRepository`: typed adapter with `load/save/reset` contract and tests using a fake Supabase client.
-- Next step: create a real Supabase project, apply the migration, then connect Auth and realtime subscriptions.
+- `workspaceRepositoryFactory`: automatically selects Supabase when both public env vars exist.
+- Migration now includes frontend-compatible text IDs, RLS, membership policies, and indexes.
+- Next step: add Auth bootstrap so a real user creates `profile → workspace → workspace_member` before live persistence.
 
 ## Migration
 
