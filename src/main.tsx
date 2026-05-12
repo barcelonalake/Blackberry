@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Circle,
   Code2,
+  Cpu,
   Database,
   FileText,
   Hash,
@@ -23,7 +24,7 @@ import {
   UserRound,
   Workflow,
 } from 'lucide-react';
-import type { Artifact, Memory, Message, Session, Task, WorkspaceState } from './domain/types';
+import type { AgentRun, Artifact, Memory, Message, Session, Task, WorkspaceState } from './domain/types';
 import { createWorkspaceRuntime } from './data/workspaceRepositoryFactory';
 import { createAuthRuntime, type AuthBootstrapSession } from './auth/authBootstrap';
 import { initialState } from './data/initialState';
@@ -33,6 +34,9 @@ import './styles.css';
 const env = {
   VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
   VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY,
+  VITE_AI_GATEWAY_URL: import.meta.env.VITE_AI_GATEWAY_URL,
+  VITE_AI_PROVIDER: import.meta.env.VITE_AI_PROVIDER,
+  VITE_AI_MODEL: import.meta.env.VITE_AI_MODEL,
 };
 
 const runtime = createWorkspaceRuntime({
@@ -42,13 +46,21 @@ const runtime = createWorkspaceRuntime({
 const authRuntime = createAuthRuntime({ env, storage: window.localStorage });
 const repository = runtime.repository;
 const gateway = new AIGatewayClient();
+const providerOptions = ['mock', 'kimi', 'deepseek', 'openai', 'anthropic'] as const;
+const modelPresets: Record<string, string> = {
+  mock: 'gateway/mock-stream',
+  kimi: 'kimi-k2.6:cloud',
+  deepseek: 'deepseek-r1:cloud',
+  openai: 'gpt-5.5',
+  anthropic: 'claude-sonnet-4.5',
+};
 
-const APP_VERSION = 'v0.2.2';
+const APP_VERSION = 'v0.3.0';
 const ROADMAP_URL = 'https://barcelonalake.github.io/hosthtml/artifacts/ai-workspace-roadmap.html';
 const roadmapVersions = [
   { version: 'v0.1', label: 'HTML Prototype', status: 'done', detail: '資訊架構與三欄視覺已驗證。' },
-  { version: 'v0.2', label: 'Web MVP', status: 'active', detail: 'PWA、local persistence、Auth bootstrap、Artifact 編輯與匯出。' },
-  { version: 'v0.3', label: 'Multi-model Agent', status: 'next', detail: 'AI Gateway、provider adapter、agent run queue。' },
+  { version: 'v0.2', label: 'Web MVP', status: 'done', detail: 'PWA、local persistence、Auth bootstrap、Artifact 編輯與匯出。' },
+  { version: 'v0.3', label: 'Multi-model Agent', status: 'active', detail: 'AI Gateway、provider adapter、agent run queue。' },
   { version: 'v1.0', label: 'Native + Web Stable', status: 'later', detail: 'SwiftUI 原生端與穩定同步。' },
 ] as const;
 
@@ -68,6 +80,8 @@ function App() {
   const [syncError, setSyncError] = useState('');
   const [artifactDraft, setArtifactDraft] = useState('');
   const [artifactNotice, setArtifactNotice] = useState('');
+  const [selectedProvider, setSelectedProvider] = useState(gateway.runtime.provider);
+  const [selectedModel, setSelectedModel] = useState(gateway.runtime.model);
   const stateRef = useRef(state);
 
   useEffect(() => {
@@ -120,8 +134,25 @@ function App() {
     { label: 'Channels', value: state.channels.length, icon: Hash },
     { label: 'Sessions', value: state.sessions.length, icon: MessageSquare },
     { label: 'Artifacts', value: state.artifacts.length, icon: Archive },
-    { label: 'Tasks', value: state.tasks.length, icon: CheckCircle2 },
+    { label: 'Agent Runs', value: state.agentRuns.length, icon: Cpu },
   ], [state]);
+
+  function setProvider(nextProvider: string) {
+    setSelectedProvider(nextProvider);
+    setSelectedModel(modelPresets[nextProvider] ?? selectedModel);
+  }
+
+  function updateAgentRun(runId: string, patch: Partial<AgentRun>) {
+    const current = stateRef.current;
+    const nextRuns = current.agentRuns.map((run) => (run.id === runId ? { ...run, ...patch } : run));
+    const next = { ...current, agentRuns: nextRuns };
+    stateRef.current = next;
+    setState(next);
+    Promise.resolve(repository.save(next)).catch((error: unknown) => {
+      setSyncStatus('error');
+      setSyncError(String(error));
+    });
+  }
 
   async function persist(next: WorkspaceState) {
     stateRef.current = next;
@@ -161,8 +192,8 @@ function App() {
       title: `New ${activeChannel.name} session`,
       kind: 'chat',
       status: 'active',
-      model: runtime.backend === 'supabase' ? 'gateway/supabase' : 'gateway/mock-stream',
-      summary: `新建立的 AI 工作單元；目前使用 ${runtime.label}。`,
+      model: `${selectedProvider}/${selectedModel}`,
+      summary: `新建立的 AI 工作單元；目前使用 ${selectedProvider} provider。`,
     };
     persist({ ...state, sessions: [nextSession, ...state.sessions] });
     setActiveSessionId(id);
@@ -171,29 +202,49 @@ function App() {
   async function sendMessage() {
     if (!draft.trim() || !activeSession || isStreaming || syncStatus === 'loading') return;
     const time = nowLabel();
-    const userMessage: Message = { id: `m${Date.now()}`, sessionId: activeSession.id, role: 'user', content: draft.trim(), time };
+    const prompt = draft.trim();
+    const userMessage: Message = { id: `m${Date.now()}`, sessionId: activeSession.id, role: 'user', content: prompt, time };
     const assistantId = `m${Date.now() + 1}`;
+    const runId = `run${Date.now() + 2}`;
     const assistantMessage: Message = { id: assistantId, sessionId: activeSession.id, role: 'assistant', content: '', time };
-    const seed = { ...state, messages: [...state.messages, userMessage, assistantMessage] };
+    const agentRun: AgentRun = {
+      id: runId,
+      sessionId: activeSession.id,
+      provider: selectedProvider,
+      model: selectedModel,
+      status: 'running',
+      input: prompt,
+      output: '',
+      startedAt: time,
+    };
+    const seed = { ...state, messages: [...state.messages, userMessage, assistantMessage], agentRuns: [agentRun, ...state.agentRuns] };
     await persist(seed);
     setDraft('');
     setIsStreaming(true);
 
     try {
-      for await (const chunk of gateway.streamSessionMessage({ sessionId: activeSession.id, messages: [...messages, userMessage] })) {
+      for await (const chunk of gateway.streamSessionMessage({ sessionId: activeSession.id, messages: [...messages, userMessage], provider: selectedProvider, model: selectedModel, runId })) {
         if (chunk.done) break;
         const current = stateRef.current;
         const nextMessages = current.messages.map((message) =>
           message.id === assistantId ? { ...message, content: message.content + chunk.delta } : message,
         );
-        await persist({ ...current, messages: nextMessages });
+        const nextRuns = current.agentRuns.map((run) =>
+          run.id === runId ? { ...run, output: run.output + chunk.delta } : run,
+        );
+        await persist({ ...current, messages: nextMessages, agentRuns: nextRuns });
       }
+      updateAgentRun(runId, { status: 'completed', completedAt: nowLabel() });
     } catch (error) {
       const current = stateRef.current;
+      const errorText = `AI Gateway error: ${String(error)}`;
       const nextMessages = current.messages.map((message) =>
-        message.id === assistantId ? { ...message, content: `AI Gateway error: ${String(error)}` } : message,
+        message.id === assistantId ? { ...message, content: errorText } : message,
       );
-      await persist({ ...current, messages: nextMessages });
+      const nextRuns = current.agentRuns.map((run) =>
+        run.id === runId ? { ...run, status: 'failed' as const, output: errorText, completedAt: nowLabel() } : run,
+      );
+      await persist({ ...current, messages: nextMessages, agentRuns: nextRuns });
     } finally {
       setIsStreaming(false);
     }
@@ -315,7 +366,7 @@ function App() {
         <div className="roadmap-head">
           <div>
             <div className="panel-title"><Rocket size={18} /> Version roadmap</div>
-            <p>參考 roadmap：目前標注為 <b>{APP_VERSION}</b>，屬於 v0.2 Web MVP 階段；本版補上 Artifact 編輯、複製與 Markdown 匯出。</p>
+            <p>參考 roadmap：目前標注為 <b>{APP_VERSION}</b>，正式進入 v0.3 Multi-model Agent；本版加入 provider adapter、Agent Runs queue 與 SSE fallback。</p>
           </div>
           <a href={ROADMAP_URL} target="_blank" rel="noreferrer">Open roadmap</a>
         </div>
@@ -328,6 +379,24 @@ function App() {
             </article>
           ))}
         </div>
+      </section>
+
+      <section className="agent-runtime-card">
+        <div>
+          <div className="panel-title"><Cpu size={18} /> Agent Runtime</div>
+          <p>{gateway.runtime.mode === 'sse' ? 'SSE gateway connected' : 'Local mock stream；設定 VITE_AI_GATEWAY_URL 後切換真實 SSE。'}</p>
+          <small>{gateway.runtime.endpointLabel}</small>
+        </div>
+        <label>
+          Provider
+          <select value={selectedProvider} onChange={(event) => setProvider(event.target.value)}>
+            {providerOptions.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
+          </select>
+        </label>
+        <label>
+          Model
+          <input value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} />
+        </label>
       </section>
 
       <section className="metrics">
@@ -422,6 +491,17 @@ function App() {
           </section>
 
           <section>
+            <h2><Cpu size={16} /> Agent Runs</h2>
+            {state.agentRuns.filter((run) => run.sessionId === activeSession?.id).map((run) => (
+              <article className={`agent-run ${run.status}`} key={run.id}>
+                <b>{run.provider}/{run.model}</b>
+                <small>{run.status} · {run.startedAt}{run.completedAt ? ` → ${run.completedAt}` : ''}</small>
+                <p>{run.output || run.input}</p>
+              </article>
+            ))}
+          </section>
+
+          <section>
             <h2><CheckCircle2 size={16} /> Task Board</h2>
             {(['todo', 'in_progress', 'blocked', 'done'] as Task['status'][]).map((status) => (
               <div className="task-column" key={status}>
@@ -434,11 +514,12 @@ function App() {
       </section>
 
       <footer>
-        <Rocket size={16} /> {APP_VERSION}: Artifact 編輯、複製、Markdown 匯出已接入；Next: real AI Gateway SSE and provider adapter.
+        <Rocket size={16} /> {APP_VERSION}: Multi-model Agent、provider adapter、Agent Runs queue 已接入；Next: backend-hosted AI Gateway.
       </footer>
     </main>
   );
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
+
 

@@ -1,5 +1,5 @@
 import { initialState } from './initialState';
-import type { Artifact, Channel, Memory, Message, Session, Task, WorkspaceState } from '../domain/types';
+import type { AgentRun, Artifact, Channel, Memory, Message, Session, Task, WorkspaceState } from '../domain/types';
 
 export const STORAGE_KEY = 'blackberry.ai-workspace-os.v01';
 
@@ -25,8 +25,17 @@ export type SupabaseLikeClient = {
 
 type WorkspaceTableName = keyof WorkspaceState;
 
-const READ_TABLES: WorkspaceTableName[] = ['channels', 'sessions', 'messages', 'artifacts', 'memories', 'tasks'];
-const WRITE_TABLES: WorkspaceTableName[] = ['tasks', 'memories', 'artifacts', 'messages', 'sessions', 'channels'];
+const READ_TABLES: WorkspaceTableName[] = ['channels', 'sessions', 'messages', 'artifacts', 'memories', 'tasks', 'agentRuns'];
+const WRITE_TABLES: WorkspaceTableName[] = ['agentRuns', 'tasks', 'memories', 'artifacts', 'messages', 'sessions', 'channels'];
+const SUPABASE_TABLES: Record<WorkspaceTableName, string> = {
+  channels: 'channels',
+  sessions: 'sessions',
+  messages: 'messages',
+  artifacts: 'artifacts',
+  memories: 'memories',
+  tasks: 'tasks',
+  agentRuns: 'agent_runs',
+};
 
 export class LocalWorkspaceRepository implements WorkspaceRepository {
   constructor(private readonly storage: Storage = window.localStorage) {}
@@ -57,7 +66,7 @@ export class SupabaseWorkspaceRepository implements WorkspaceRepository {
   async load(): Promise<WorkspaceState> {
     const entries = await Promise.all(
       READ_TABLES.map(async (table) => {
-        const { data, error } = await this.client.from(table).select('*');
+        const { data, error } = await this.client.from(SUPABASE_TABLES[table]).select('*');
         if (error) throw error;
         return [table, data ?? []] as const;
       }),
@@ -67,10 +76,10 @@ export class SupabaseWorkspaceRepository implements WorkspaceRepository {
 
   async save(next: WorkspaceState): Promise<void> {
     for (const table of WRITE_TABLES) {
-      const deleteResult = await this.client.from(table).delete().neq('id', '__never__');
+      const deleteResult = await this.client.from(SUPABASE_TABLES[table]).delete().neq('id', '__never__');
       if (deleteResult.error) throw deleteResult.error;
-      const payload = next[table] as Channel[] | Session[] | Message[] | Artifact[] | Memory[] | Task[];
-      const upsertResult = await this.client.from(table).upsert(payload);
+      const payload = next[table] as Channel[] | Session[] | Message[] | Artifact[] | Memory[] | Task[] | AgentRun[];
+      const upsertResult = await this.client.from(SUPABASE_TABLES[table]).upsert(payload);
       if (upsertResult.error) throw upsertResult.error;
     }
   }
@@ -80,3 +89,4 @@ export class SupabaseWorkspaceRepository implements WorkspaceRepository {
     return initialState;
   }
 }
+

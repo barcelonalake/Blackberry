@@ -25,6 +25,7 @@ function createSupabaseMock(seed = cloneState()) {
   rows.set('artifacts', seed.artifacts);
   rows.set('memories', seed.memories);
   rows.set('tasks', seed.tasks);
+  rows.set('agent_runs', seed.agentRuns);
   const deletes: string[] = [];
   const upserts: Record<string, unknown[]> = {};
 
@@ -77,8 +78,10 @@ describe('SupabaseWorkspaceRepository', () => {
 
     await repo.save(state);
 
-    expect(supabase.deletes).toEqual(['tasks', 'memories', 'artifacts', 'messages', 'sessions', 'channels']);
+    expect(supabase.deletes).toEqual(['agent_runs', 'tasks', 'memories', 'artifacts', 'messages', 'sessions', 'channels']);
     expect(supabase.upserts.sessions).toEqual(state.sessions);
     expect(supabase.upserts.messages).toEqual([]);
+    expect(supabase.upserts.agent_runs).toEqual(state.agentRuns);
   });
 });
+

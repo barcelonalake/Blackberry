@@ -43,6 +43,18 @@ export type Task = {
   sessionId: string;
 };
 
+export type AgentRun = {
+  id: string;
+  sessionId: string;
+  provider: string;
+  model: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  input: string;
+  output: string;
+  startedAt: string;
+  completedAt?: string;
+};
+
 export type WorkspaceState = {
   channels: Channel[];
   sessions: Session[];
@@ -50,4 +62,5 @@ export type WorkspaceState = {
   artifacts: Artifact[];
   memories: Memory[];
   tasks: Task[];
+  agentRuns: AgentRun[];
 };
