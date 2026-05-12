@@ -28,6 +28,7 @@ import './styles.css';
 
 const repository = new LocalWorkspaceRepository();
 const gateway = new AIGatewayClient();
+const persistenceLabel = import.meta.env.VITE_SUPABASE_URL ? 'Supabase ready' : 'Local repository';
 
 function nowLabel() {
   return new Date().toLocaleTimeString('zh-Hant', { hour: '2-digit', minute: '2-digit' });
@@ -135,7 +136,7 @@ function App() {
         </div>
         <div className="status-stack">
           <div className="status-pill"><Smartphone size={16} /> PWA online</div>
-          <div className="status-pill"><Database size={16} /> Local repository</div>
+          <div className="status-pill"><Database size={16} /> {persistenceLabel}</div>
         </div>
       </header>
 
