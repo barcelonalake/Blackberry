@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import {
   Archive,
@@ -22,25 +22,55 @@ import {
   Workflow,
 } from 'lucide-react';
 import type { Memory, Message, Session, Task, WorkspaceState } from './domain/types';
-import { LocalWorkspaceRepository } from './data/workspaceRepository';
+import { createWorkspaceRuntime } from './data/workspaceRepositoryFactory';
+import { initialState } from './data/initialState';
 import { AIGatewayClient } from './services/aiGatewayClient';
 import './styles.css';
 
-const repository = new LocalWorkspaceRepository();
+const runtime = createWorkspaceRuntime({
+  env: {
+    VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
+    VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY,
+  },
+  storage: window.localStorage,
+});
+const repository = runtime.repository;
 const gateway = new AIGatewayClient();
-const persistenceLabel = import.meta.env.VITE_SUPABASE_URL ? 'Supabase ready' : 'Local repository';
 
 function nowLabel() {
   return new Date().toLocaleTimeString('zh-Hant', { hour: '2-digit', minute: '2-digit' });
 }
 
 function App() {
-  const [state, setState] = useState<WorkspaceState>(() => repository.load());
-  const [activeChannelId, setActiveChannelId] = useState(state.channels[0]?.id ?? 'product');
-  const [activeSessionId, setActiveSessionId] = useState(state.sessions[0]?.id ?? 's1');
+  const [state, setState] = useState<WorkspaceState>(initialState);
+  const [activeChannelId, setActiveChannelId] = useState(initialState.channels[0]?.id ?? 'product');
+  const [activeSessionId, setActiveSessionId] = useState(initialState.sessions[0]?.id ?? 's1');
   const [draft, setDraft] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'loading' | 'synced' | 'saving' | 'error'>('loading');
+  const [syncError, setSyncError] = useState('');
   const stateRef = useRef(state);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function bootstrap() {
+      try {
+        const loaded = await repository.load();
+        if (cancelled) return;
+        stateRef.current = loaded;
+        setState(loaded);
+        setActiveChannelId(loaded.channels[0]?.id ?? 'product');
+        setActiveSessionId(loaded.sessions[0]?.id ?? 's1');
+        setSyncStatus('synced');
+      } catch (error) {
+        if (cancelled) return;
+        setSyncError(String(error));
+        setSyncStatus('error');
+      }
+    }
+    bootstrap();
+    return () => { cancelled = true; };
+  }, []);
 
   const activeChannel = state.channels.find((channel) => channel.id === activeChannelId) ?? state.channels[0];
   const channelSessions = state.sessions.filter((session) => session.channelId === activeChannelId);
@@ -55,17 +85,34 @@ function App() {
     { label: 'Tasks', value: state.tasks.length, icon: CheckCircle2 },
   ], [state]);
 
-  function persist(next: WorkspaceState) {
+  async function persist(next: WorkspaceState) {
     stateRef.current = next;
     setState(next);
-    repository.save(next);
+    setSyncStatus('saving');
+    try {
+      await repository.save(next);
+      setSyncStatus('synced');
+      setSyncError('');
+    } catch (error) {
+      setSyncStatus('error');
+      setSyncError(String(error));
+    }
   }
 
-  function resetWorkspace() {
-    const next = repository.reset();
-    persist(next);
-    setActiveChannelId(next.channels[0]?.id ?? 'product');
-    setActiveSessionId(next.sessions[0]?.id ?? 's1');
+  async function resetWorkspace() {
+    try {
+      setSyncStatus('saving');
+      const next = await repository.reset();
+      stateRef.current = next;
+      setState(next);
+      setActiveChannelId(next.channels[0]?.id ?? 'product');
+      setActiveSessionId(next.sessions[0]?.id ?? 's1');
+      setSyncStatus('synced');
+      setSyncError('');
+    } catch (error) {
+      setSyncStatus('error');
+      setSyncError(String(error));
+    }
   }
 
   function createSession() {
@@ -76,21 +123,21 @@ function App() {
       title: `New ${activeChannel.name} session`,
       kind: 'chat',
       status: 'active',
-      model: 'gateway/mock-stream',
-      summary: '新建立的 AI 工作單元；訊息會先保存到 local repository。',
+      model: runtime.backend === 'supabase' ? 'gateway/supabase' : 'gateway/mock-stream',
+      summary: `新建立的 AI 工作單元；目前使用 ${runtime.label}。`,
     };
     persist({ ...state, sessions: [nextSession, ...state.sessions] });
     setActiveSessionId(id);
   }
 
   async function sendMessage() {
-    if (!draft.trim() || !activeSession || isStreaming) return;
+    if (!draft.trim() || !activeSession || isStreaming || syncStatus === 'loading') return;
     const time = nowLabel();
     const userMessage: Message = { id: `m${Date.now()}`, sessionId: activeSession.id, role: 'user', content: draft.trim(), time };
     const assistantId = `m${Date.now() + 1}`;
     const assistantMessage: Message = { id: assistantId, sessionId: activeSession.id, role: 'assistant', content: '', time };
     const seed = { ...state, messages: [...state.messages, userMessage, assistantMessage] };
-    persist(seed);
+    await persist(seed);
     setDraft('');
     setIsStreaming(true);
 
@@ -101,14 +148,14 @@ function App() {
         const nextMessages = current.messages.map((message) =>
           message.id === assistantId ? { ...message, content: message.content + chunk.delta } : message,
         );
-        persist({ ...current, messages: nextMessages });
+        await persist({ ...current, messages: nextMessages });
       }
     } catch (error) {
       const current = stateRef.current;
       const nextMessages = current.messages.map((message) =>
         message.id === assistantId ? { ...message, content: `AI Gateway error: ${String(error)}` } : message,
       );
-      persist({ ...current, messages: nextMessages });
+      await persist({ ...current, messages: nextMessages });
     } finally {
       setIsStreaming(false);
     }
@@ -136,9 +183,11 @@ function App() {
         </div>
         <div className="status-stack">
           <div className="status-pill"><Smartphone size={16} /> PWA online</div>
-          <div className="status-pill"><Database size={16} /> {persistenceLabel}</div>
+          <div className="status-pill"><Database size={16} /> {runtime.label} · {syncStatus}</div>
         </div>
       </header>
+
+      {syncStatus === 'error' && <section className="sync-error">Sync error: {syncError}</section>}
 
       <section className="metrics">
         {metrics.map(({ label, value, icon: Icon }) => <article key={label}><Icon size={18} /><strong>{value}</strong><span>{label}</span></article>)}
@@ -148,7 +197,7 @@ function App() {
         <aside className="sidebar card-panel">
           <div className="panel-title"><Layers3 size={18} /> Workspace</div>
           <button className="primary-action"><Plus size={16} /> New Workspace</button>
-          <button className="ghost" onClick={resetWorkspace}><RefreshCcw size={14} /> Reset local data</button>
+          <button className="ghost" onClick={resetWorkspace} disabled={syncStatus === 'loading'}><RefreshCcw size={14} /> Reset data</button>
           <div className="section-label">Channels</div>
           {state.channels.map((channel) => (
             <button
@@ -167,7 +216,7 @@ function App() {
 
         <section className="session-list card-panel">
           <div className="panel-title"><MessageSquare size={18} /> {activeChannel?.name}</div>
-          <button className="primary-action" onClick={createSession}><Plus size={16} /> New Session</button>
+          <button className="primary-action" onClick={createSession} disabled={syncStatus === 'loading'}><Plus size={16} /> New Session</button>
           {channelSessions.map((session) => (
             <button className={`session-row ${session.id === activeSession?.id ? 'active' : ''}`} key={session.id} onClick={() => setActiveSessionId(session.id)}>
               <span className="session-kind">{session.kind}</span>
@@ -184,7 +233,7 @@ function App() {
               <div className="panel-title"><Bot size={18} /> {activeSession?.title}</div>
               <p>{activeSession?.summary}</p>
             </div>
-            <button onClick={addTaskFromSession}><Workflow size={16} /> Task</button>
+            <button onClick={addTaskFromSession} disabled={syncStatus === 'loading'}><Workflow size={16} /> Task</button>
           </div>
 
           <div className="messages">
@@ -198,7 +247,7 @@ function App() {
 
           <div className="composer">
             <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="輸入需求：例如『把這段回答轉成 artifact』" />
-            <button onClick={sendMessage} disabled={isStreaming}><Send size={18} /> {isStreaming ? 'Streaming' : 'Send'}</button>
+            <button onClick={sendMessage} disabled={isStreaming || syncStatus === 'loading'}><Send size={18} /> {isStreaming ? 'Streaming' : 'Send'}</button>
           </div>
         </section>
 
@@ -212,7 +261,7 @@ function App() {
 
           <section>
             <h2><Brain size={16} /> Memories</h2>
-            <button className="ghost" onClick={addMemoryFromSession}><Plus size={14} /> Save current session</button>
+            <button className="ghost" onClick={addMemoryFromSession} disabled={syncStatus === 'loading'}><Plus size={14} /> Save current session</button>
             {state.memories.map((memory) => <article className="mini-card" key={memory.id}><Circle size={12} className={memory.active ? 'green' : ''} /><b>{memory.title}</b><p>{memory.content}</p></article>)}
           </section>
 
@@ -229,7 +278,7 @@ function App() {
       </section>
 
       <footer>
-        <Rocket size={16} /> Next: connect Supabase Auth / Postgres, then switch mock gateway to FastAPI SSE.
+        <Rocket size={16} /> Next: apply Supabase migration and connect Auth once project env is available.
       </footer>
     </main>
   );

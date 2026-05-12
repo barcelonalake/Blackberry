@@ -19,7 +19,7 @@ type SupabaseTable = {
   upsert(payload: unknown[]): Promise<{ error: Error | null }>;
 };
 
-type SupabaseLikeClient = {
+export type SupabaseLikeClient = {
   from(table: string): SupabaseTable;
 };
 
