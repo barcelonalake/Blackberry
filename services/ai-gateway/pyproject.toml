@@ -1,0 +1,9 @@
+[project]
+name = "ai-workspace-gateway"
+version = "0.1.0"
+description = "FastAPI AI Gateway skeleton for Blackberry / AI Workspace OS"
+requires-python = ">=3.11"
+dependencies = ["fastapi", "uvicorn", "pydantic", "httpx", "sse-starlette"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
