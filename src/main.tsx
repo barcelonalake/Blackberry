@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import {
   Archive,
+  Clipboard,
   Bot,
   Brain,
   CheckCircle2,
@@ -42,11 +43,11 @@ const authRuntime = createAuthRuntime({ env, storage: window.localStorage });
 const repository = runtime.repository;
 const gateway = new AIGatewayClient();
 
-const APP_VERSION = 'v0.2.1';
+const APP_VERSION = 'v0.2.2';
 const ROADMAP_URL = 'https://barcelonalake.github.io/hosthtml/artifacts/ai-workspace-roadmap.html';
 const roadmapVersions = [
   { version: 'v0.1', label: 'HTML Prototype', status: 'done', detail: '資訊架構與三欄視覺已驗證。' },
-  { version: 'v0.2', label: 'Web MVP', status: 'active', detail: 'PWA、local persistence、Auth bootstrap、Artifact 版本化。' },
+  { version: 'v0.2', label: 'Web MVP', status: 'active', detail: 'PWA、local persistence、Auth bootstrap、Artifact 編輯與匯出。' },
   { version: 'v0.3', label: 'Multi-model Agent', status: 'next', detail: 'AI Gateway、provider adapter、agent run queue。' },
   { version: 'v1.0', label: 'Native + Web Stable', status: 'later', detail: 'SwiftUI 原生端與穩定同步。' },
 ] as const;
@@ -65,6 +66,8 @@ function App() {
   const [authSession, setAuthSession] = useState<AuthBootstrapSession | null>(null);
   const [authStatus, setAuthStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [syncError, setSyncError] = useState('');
+  const [artifactDraft, setArtifactDraft] = useState('');
+  const [artifactNotice, setArtifactNotice] = useState('');
   const stateRef = useRef(state);
 
   useEffect(() => {
@@ -111,6 +114,7 @@ function App() {
   const activeSession = state.sessions.find((session) => session.id === activeSessionId) ?? channelSessions[0] ?? state.sessions[0];
   const messages = state.messages.filter((message) => message.sessionId === activeSession?.id);
   const sessionArtifacts = state.artifacts.filter((artifact) => artifact.sessionId === activeSession?.id);
+  const selectedArtifact = sessionArtifacts[0];
 
   const metrics = useMemo(() => [
     { label: 'Channels', value: state.channels.length, icon: Hash },
@@ -214,8 +218,48 @@ function App() {
       version: nextVersion,
       content,
     };
+    setArtifactDraft(content);
+    setArtifactNotice(`Artifact v${nextVersion} saved`);
     persist({ ...state, artifacts: [nextArtifact, ...state.artifacts] });
   }
+
+  function updateSelectedArtifactContent() {
+    if (!selectedArtifact) return;
+    const nextArtifacts = state.artifacts.map((artifact) =>
+      artifact.id === selectedArtifact.id ? { ...artifact, content: artifactDraft } : artifact,
+    );
+    setArtifactNotice(`Artifact v${selectedArtifact.version} updated`);
+    persist({ ...state, artifacts: nextArtifacts });
+  }
+
+  async function copySelectedArtifact() {
+    if (!selectedArtifact) return;
+    try {
+      await navigator.clipboard.writeText(selectedArtifact.content);
+      setArtifactNotice(`Artifact v${selectedArtifact.version} copied`);
+    } catch {
+      setArtifactNotice('Copy unavailable in this browser');
+    }
+  }
+
+  function downloadSelectedArtifact() {
+    if (!selectedArtifact) return;
+    const blob = new Blob([selectedArtifact.content], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${selectedArtifact.title.replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '-').slice(0, 60)}-v${selectedArtifact.version}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setArtifactNotice(`Artifact v${selectedArtifact.version} exported`);
+  }
+
+  useEffect(() => {
+    setArtifactDraft(selectedArtifact?.content ?? '');
+    setArtifactNotice('');
+  }, [selectedArtifact?.id]);
 
   function addMemoryFromSession() {
     if (!activeSession) return;
@@ -271,7 +315,7 @@ function App() {
         <div className="roadmap-head">
           <div>
             <div className="panel-title"><Rocket size={18} /> Version roadmap</div>
-            <p>參考 roadmap：目前標注為 <b>{APP_VERSION}</b>，屬於 v0.2 Web MVP 階段。</p>
+            <p>參考 roadmap：目前標注為 <b>{APP_VERSION}</b>，屬於 v0.2 Web MVP 階段；本版補上 Artifact 編輯、複製與 Markdown 匯出。</p>
           </div>
           <a href={ROADMAP_URL} target="_blank" rel="noreferrer">Open roadmap</a>
         </div>
@@ -355,6 +399,19 @@ function App() {
           <section>
             <h2><Archive size={16} /> Artifacts</h2>
             <button className="ghost" onClick={createArtifactFromSession} disabled={syncStatus === 'loading'}><Plus size={14} /> Save artifact v{Math.max(0, ...sessionArtifacts.map((artifact) => artifact.version)) + 1}</button>
+            {selectedArtifact && (
+              <div className="artifact-workbench">
+                <div className="artifact-toolbar">
+                  <span>Editing v{selectedArtifact.version}</span>
+                  <button onClick={updateSelectedArtifactContent} disabled={syncStatus === 'loading'}><FileText size={14} /> Update</button>
+                  <button onClick={copySelectedArtifact}><Clipboard size={14} /> Copy</button>
+                  <button onClick={downloadSelectedArtifact}><Archive size={14} /> Export .md</button>
+                </div>
+                <textarea value={artifactDraft} onChange={(event) => setArtifactDraft(event.target.value)} aria-label="Artifact editor" />
+                <p className="artifact-preview">{artifactDraft}</p>
+                {artifactNotice && <small className="artifact-notice">{artifactNotice}</small>}
+              </div>
+            )}
             {sessionArtifacts.map((artifact) => <article className="mini-card" key={artifact.id}><FileText size={15} /><b>{artifact.title}</b><small>{artifact.kind} · v{artifact.version}</small><p>{artifact.content}</p></article>)}
           </section>
 
@@ -377,10 +434,11 @@ function App() {
       </section>
 
       <footer>
-        <Rocket size={16} /> {APP_VERSION}: Artifact 版本化已接入；Next: real AI Gateway SSE and provider adapter.
+        <Rocket size={16} /> {APP_VERSION}: Artifact 編輯、複製、Markdown 匯出已接入；Next: real AI Gateway SSE and provider adapter.
       </footer>
     </main>
   );
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
+
