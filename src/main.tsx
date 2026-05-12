@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import {
   Archive,
@@ -7,100 +7,39 @@ import {
   CheckCircle2,
   Circle,
   Code2,
+  Database,
   FileText,
   Hash,
   Layers3,
   MessageSquare,
   PanelRight,
   Plus,
+  RefreshCcw,
   Rocket,
   Send,
   Sparkles,
   Smartphone,
   Workflow,
 } from 'lucide-react';
+import type { Memory, Message, Session, Task, WorkspaceState } from './domain/types';
+import { LocalWorkspaceRepository } from './data/workspaceRepository';
+import { AIGatewayClient } from './services/aiGatewayClient';
 import './styles.css';
 
-type Channel = { id: string; name: string; description: string; kind: string };
-type Session = { id: string; channelId: string; title: string; kind: string; status: string; model: string; summary: string };
-type Message = { id: string; sessionId: string; role: 'user' | 'assistant' | 'system'; content: string; time: string };
-type Artifact = { id: string; sessionId: string; title: string; kind: string; content: string; version: number };
-type Memory = { id: string; title: string; content: string; scope: string; active: boolean };
-type Task = { id: string; title: string; status: 'todo' | 'in_progress' | 'blocked' | 'done'; priority: 'low' | 'medium' | 'high'; sessionId: string };
+const repository = new LocalWorkspaceRepository();
+const gateway = new AIGatewayClient();
 
-type WorkspaceState = {
-  channels: Channel[];
-  sessions: Session[];
-  messages: Message[];
-  artifacts: Artifact[];
-  memories: Memory[];
-  tasks: Task[];
-};
-
-const STORAGE_KEY = 'blackberry.ai-workspace-os.v01';
-
-const initialState: WorkspaceState = {
-  channels: [
-    { id: 'product', name: 'product', description: '產品定位、PRD、roadmap、決策記錄', kind: 'planning' },
-    { id: 'agent-lab', name: 'agent-lab', description: 'Claude Code / Codex / Hermes 任務執行', kind: 'agent' },
-    { id: 'artifacts', name: 'artifacts', description: 'HTML、Markdown、code、diagram、prompt template', kind: 'artifact' },
-  ],
-  sessions: [
-    {
-      id: 's1',
-      channelId: 'product',
-      title: 'AI Workspace OS v0.1 閉環設計',
-      kind: 'design',
-      status: 'active',
-      model: 'kimi-k2.6:cloud',
-      summary: '人提出問題 → AI 工作 → artifact → memory → task → 回到 session 執行。',
-    },
-    {
-      id: 's2',
-      channelId: 'agent-lab',
-      title: 'Blackberry PWA 第一版實作',
-      kind: 'coding-agent',
-      status: 'active',
-      model: 'claude-code',
-      summary: '建立手機優先 workspace shell，預留 Supabase 與 AI Gateway。',
-    },
-  ],
-  messages: [
-    { id: 'm1', sessionId: 's1', role: 'user', content: '根據 AI Workspace OS 文檔，先做 v0.1 的可操作產品外殼。', time: '09:20' },
-    { id: 'm2', sessionId: 's1', role: 'assistant', content: '已拆成 Workspace / Channel / Session / Message / Artifact / Memory / Task 的核心資訊架構，先用 PWA 驗證。', time: '09:21' },
-    { id: 'm3', sessionId: 's2', role: 'assistant', content: '下一步會接入 Supabase Auth、session persistence、AI Gateway SSE streaming。', time: '09:24' },
-  ],
-  artifacts: [
-    { id: 'a1', sessionId: 's1', title: 'v0.1 Product Architecture', kind: 'markdown', version: 1, content: 'PRD / data model / architecture docs 已落在 docs/。' },
-    { id: 'a2', sessionId: 's2', title: 'Supabase initial schema', kind: 'sql', version: 1, content: '0001_initial_schema.sql 建立 profiles、workspaces、channels、sessions、messages、artifacts、memories、tasks、agent_runs。' },
-  ],
-  memories: [
-    { id: 'mem1', title: '交付偏好', content: '手機優先，所有成果要能用 URL 在手機打開驗收。', scope: 'workspace', active: true },
-    { id: 'mem2', title: '產品方向', content: '不是普通聊天工具，而是 AI 工作空間。', scope: 'workspace', active: true },
-  ],
-  tasks: [
-    { id: 't1', title: '建立 repo 結構與 docs', status: 'done', priority: 'high', sessionId: 's2' },
-    { id: 't2', title: '建立 Supabase migration draft', status: 'done', priority: 'high', sessionId: 's2' },
-    { id: 't3', title: '實作手機版 Workspace Shell', status: 'in_progress', priority: 'high', sessionId: 's2' },
-    { id: 't4', title: '接 AI Gateway SSE streaming', status: 'todo', priority: 'medium', sessionId: 's1' },
-  ],
-};
-
-function loadState(): WorkspaceState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return initialState;
-    return { ...initialState, ...JSON.parse(raw) };
-  } catch {
-    return initialState;
-  }
+function nowLabel() {
+  return new Date().toLocaleTimeString('zh-Hant', { hour: '2-digit', minute: '2-digit' });
 }
 
 function App() {
-  const [state, setState] = useState<WorkspaceState>(loadState);
+  const [state, setState] = useState<WorkspaceState>(() => repository.load());
   const [activeChannelId, setActiveChannelId] = useState(state.channels[0]?.id ?? 'product');
   const [activeSessionId, setActiveSessionId] = useState(state.sessions[0]?.id ?? 's1');
   const [draft, setDraft] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const stateRef = useRef(state);
 
   const activeChannel = state.channels.find((channel) => channel.id === activeChannelId) ?? state.channels[0];
   const channelSessions = state.sessions.filter((session) => session.channelId === activeChannelId);
@@ -116,8 +55,16 @@ function App() {
   ], [state]);
 
   function persist(next: WorkspaceState) {
+    stateRef.current = next;
     setState(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    repository.save(next);
+  }
+
+  function resetWorkspace() {
+    const next = repository.reset();
+    persist(next);
+    setActiveChannelId(next.channels[0]?.id ?? 'product');
+    setActiveSessionId(next.sessions[0]?.id ?? 's1');
   }
 
   function createSession() {
@@ -128,26 +75,42 @@ function App() {
       title: `New ${activeChannel.name} session`,
       kind: 'chat',
       status: 'active',
-      model: 'gateway/default',
-      summary: '新建立的 AI 工作單元。',
+      model: 'gateway/mock-stream',
+      summary: '新建立的 AI 工作單元；訊息會先保存到 local repository。',
     };
     persist({ ...state, sessions: [nextSession, ...state.sessions] });
     setActiveSessionId(id);
   }
 
-  function sendMessage() {
-    if (!draft.trim() || !activeSession) return;
-    const now = new Date().toLocaleTimeString('zh-Hant', { hour: '2-digit', minute: '2-digit' });
-    const userMessage: Message = { id: `m${Date.now()}`, sessionId: activeSession.id, role: 'user', content: draft.trim(), time: now };
-    const assistantMessage: Message = {
-      id: `m${Date.now() + 1}`,
-      sessionId: activeSession.id,
-      role: 'assistant',
-      content: '已收到。v0.1 目前是本地 PWA shell；下一步會把這條訊息經 AI Gateway SSE 送到模型，並保存到 Supabase messages。',
-      time: now,
-    };
-    persist({ ...state, messages: [...state.messages, userMessage, assistantMessage] });
+  async function sendMessage() {
+    if (!draft.trim() || !activeSession || isStreaming) return;
+    const time = nowLabel();
+    const userMessage: Message = { id: `m${Date.now()}`, sessionId: activeSession.id, role: 'user', content: draft.trim(), time };
+    const assistantId = `m${Date.now() + 1}`;
+    const assistantMessage: Message = { id: assistantId, sessionId: activeSession.id, role: 'assistant', content: '', time };
+    const seed = { ...state, messages: [...state.messages, userMessage, assistantMessage] };
+    persist(seed);
     setDraft('');
+    setIsStreaming(true);
+
+    try {
+      for await (const chunk of gateway.streamSessionMessage({ sessionId: activeSession.id, messages: [...messages, userMessage] })) {
+        if (chunk.done) break;
+        const current = stateRef.current;
+        const nextMessages = current.messages.map((message) =>
+          message.id === assistantId ? { ...message, content: message.content + chunk.delta } : message,
+        );
+        persist({ ...current, messages: nextMessages });
+      }
+    } catch (error) {
+      const current = stateRef.current;
+      const nextMessages = current.messages.map((message) =>
+        message.id === assistantId ? { ...message, content: `AI Gateway error: ${String(error)}` } : message,
+      );
+      persist({ ...current, messages: nextMessages });
+    } finally {
+      setIsStreaming(false);
+    }
   }
 
   function addTaskFromSession() {
@@ -170,7 +133,10 @@ function App() {
           <h1>Blackberry</h1>
           <p>Discord-like AI 工作空間：Session、Artifact、Memory、Task Board 在手機上形成閉環。</p>
         </div>
-        <div className="status-pill"><Smartphone size={16} /> PWA online</div>
+        <div className="status-stack">
+          <div className="status-pill"><Smartphone size={16} /> PWA online</div>
+          <div className="status-pill"><Database size={16} /> Local repository</div>
+        </div>
       </header>
 
       <section className="metrics">
@@ -181,12 +147,16 @@ function App() {
         <aside className="sidebar card-panel">
           <div className="panel-title"><Layers3 size={18} /> Workspace</div>
           <button className="primary-action"><Plus size={16} /> New Workspace</button>
+          <button className="ghost" onClick={resetWorkspace}><RefreshCcw size={14} /> Reset local data</button>
           <div className="section-label">Channels</div>
           {state.channels.map((channel) => (
             <button
               className={`channel-row ${channel.id === activeChannelId ? 'active' : ''}`}
               key={channel.id}
-              onClick={() => { setActiveChannelId(channel.id); setActiveSessionId(state.sessions.find((s) => s.channelId === channel.id)?.id ?? activeSessionId); }}
+              onClick={() => {
+                setActiveChannelId(channel.id);
+                setActiveSessionId(state.sessions.find((s) => s.channelId === channel.id)?.id ?? activeSessionId);
+              }}
             >
               <Hash size={16} />
               <span><b>{channel.name}</b><small>{channel.description}</small></span>
@@ -220,14 +190,14 @@ function App() {
             {messages.map((message) => (
               <article className={`message ${message.role}`} key={message.id}>
                 <div><b>{message.role}</b><time>{message.time}</time></div>
-                <p>{message.content}</p>
+                <p>{message.content || (message.role === 'assistant' && isStreaming ? 'Streaming…' : '')}</p>
               </article>
             ))}
           </div>
 
           <div className="composer">
             <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="輸入需求：例如『把這段回答轉成 artifact』" />
-            <button onClick={sendMessage}><Send size={18} /> Send</button>
+            <button onClick={sendMessage} disabled={isStreaming}><Send size={18} /> {isStreaming ? 'Streaming' : 'Send'}</button>
           </div>
         </section>
 
@@ -258,7 +228,7 @@ function App() {
       </section>
 
       <footer>
-        <Rocket size={16} /> Next: Supabase Auth → session persistence → AI Gateway SSE streaming → artifact editor.
+        <Rocket size={16} /> Next: connect Supabase Auth / Postgres, then switch mock gateway to FastAPI SSE.
       </footer>
     </main>
   );
