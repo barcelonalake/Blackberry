@@ -48,7 +48,7 @@ export type AgentRun = {
   sessionId: string;
   provider: string;
   model: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
   input: string;
   output: string;
   startedAt: string;

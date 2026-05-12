@@ -15,9 +15,12 @@ import {
   Layers3,
   MessageSquare,
   PanelRight,
+  PauseCircle,
+  PlayCircle,
   Plus,
   RefreshCcw,
   Send,
+  XCircle,
   Workflow,
 } from 'lucide-react';
 import type { AgentRun, Artifact, Memory, Message, Session, Task, WorkspaceState } from './domain/types';
@@ -79,8 +82,10 @@ function zhLabel(label: string) {
     assistant: '助手',
     system: '系統',
     running: '執行中',
+    paused: '已暫停',
     completed: '已完成',
     failed: '失敗',
+    cancelled: '已取消',
     queued: '排隊中',
     high: '高',
     medium: '中',
@@ -109,6 +114,8 @@ function App() {
   const [selectedProvider, setSelectedProvider] = useState(initialProvider);
   const [selectedModel, setSelectedModel] = useState(modelPresets[initialProvider] ?? gateway.runtime.model);
   const stateRef = useRef(state);
+  const pausedRunIds = useRef(new Set<string>());
+  const cancelledRunIds = useRef(new Set<string>());
 
   useEffect(() => {
     let cancelled = false;
@@ -215,10 +222,36 @@ function App() {
       kind: 'chat',
       status: 'active',
       model: `${selectedProvider}/${selectedModel}`,
-      summary: `新建立的 AI 工作單元；目前使用 ${selectedProvider} provider。`,
+      summary: `新的 AI 工作單元，可輸入需求、保存成果或重跑。`,
     };
     persist({ ...state, sessions: [nextSession, ...state.sessions] });
     setActiveSessionId(id);
+  }
+
+  function pauseAgentRun(runId: string) {
+    pausedRunIds.current.add(runId);
+    updateAgentRun(runId, { status: 'paused' });
+  }
+
+  function resumeAgentRun(runId: string) {
+    pausedRunIds.current.delete(runId);
+    updateAgentRun(runId, { status: 'running' });
+  }
+
+  function cancelAgentRun(runId: string) {
+    pausedRunIds.current.delete(runId);
+    cancelledRunIds.current.add(runId);
+    updateAgentRun(runId, { status: 'cancelled', completedAt: nowLabel() });
+  }
+
+  function runSteps(run: AgentRun) {
+    const hasOutput = run.output.trim().length > 0;
+    return [
+      { label: '接收需求', done: true },
+      { label: '選擇模型', done: true },
+      { label: '生成回答', done: hasOutput || ['completed', 'cancelled', 'failed'].includes(run.status), active: run.status === 'running' || run.status === 'paused' },
+      { label: run.status === 'cancelled' ? '已取消' : '完成整理', done: run.status === 'completed' || run.status === 'cancelled' },
+    ];
   }
 
   async function sendMessage() {
@@ -247,6 +280,10 @@ function App() {
     try {
       for await (const chunk of gateway.streamSessionMessage({ sessionId: activeSession.id, messages: [...messages, userMessage], provider: selectedProvider, model: selectedModel, runId })) {
         if (chunk.done) break;
+        while (pausedRunIds.current.has(runId) && !cancelledRunIds.current.has(runId)) {
+          await new Promise((resolve) => setTimeout(resolve, 180));
+        }
+        if (cancelledRunIds.current.has(runId)) break;
         const current = stateRef.current;
         const nextMessages = current.messages.map((message) =>
           message.id === assistantId ? { ...message, content: message.content + chunk.delta } : message,
@@ -256,7 +293,15 @@ function App() {
         );
         await persist({ ...current, messages: nextMessages, agentRuns: nextRuns });
       }
-      updateAgentRun(runId, { status: 'completed', completedAt: nowLabel() });
+      if (cancelledRunIds.current.has(runId)) {
+        const current = stateRef.current;
+        const nextMessages = current.messages.map((message) =>
+          message.id === assistantId && !message.content.trim() ? { ...message, content: '已取消。' } : message,
+        );
+        await persist({ ...current, messages: nextMessages });
+      } else {
+        updateAgentRun(runId, { status: 'completed', completedAt: nowLabel() });
+      }
     } catch (error) {
       const current = stateRef.current;
       const errorText = `執行失敗：${String(error)}`;
@@ -268,6 +313,8 @@ function App() {
       );
       await persist({ ...current, messages: nextMessages, agentRuns: nextRuns });
     } finally {
+      pausedRunIds.current.delete(runId);
+      cancelledRunIds.current.delete(runId);
       setIsStreaming(false);
     }
   }
@@ -503,11 +550,21 @@ function App() {
             <h2><Cpu size={16} /> Agent 執行記錄</h2>
             {state.agentRuns.filter((run) => run.sessionId === activeSession?.id).map((run) => (
               <article className={`agent-run ${run.status}`} key={run.id}>
-                <b>{run.provider}/{run.model}</b>
-                <small>{zhLabel(run.status)} · {run.startedAt}{run.completedAt ? ` → ${run.completedAt}` : ''}</small>
+                <div className="run-head">
+                  <b>{run.model}</b>
+                  <small>{zhLabel(run.status)} · {run.startedAt}{run.completedAt ? ` → ${run.completedAt}` : ''}</small>
+                </div>
+                <div className="run-steps">
+                  {runSteps(run).map((step) => (
+                    <span className={`${step.done ? 'done' : ''} ${step.active ? 'active' : ''}`} key={step.label}>{step.label}</span>
+                  ))}
+                </div>
                 <p>{run.output || run.input}</p>
                 <div className="agent-run-actions">
-                  <button onClick={() => saveAgentRunAsArtifact(run)} disabled={syncStatus === 'loading'}><Archive size={13} /> 保存成果</button>
+                  {run.status === 'running' && <button onClick={() => pauseAgentRun(run.id)}><PauseCircle size={13} /> 暫停</button>}
+                  {run.status === 'paused' && <button onClick={() => resumeAgentRun(run.id)}><PlayCircle size={13} /> 繼續</button>}
+                  {(run.status === 'running' || run.status === 'paused') && <button onClick={() => cancelAgentRun(run.id)}><XCircle size={13} /> 取消</button>}
+                  <button onClick={() => saveAgentRunAsArtifact(run)} disabled={syncStatus === 'loading' || run.status === 'running' || run.status === 'paused'}><Archive size={13} /> 保存成果</button>
                   <button onClick={() => retryAgentRun(run)} disabled={isStreaming || syncStatus === 'loading'}><RefreshCcw size={13} /> 重跑</button>
                 </div>
               </article>
