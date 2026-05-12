@@ -55,7 +55,7 @@ const modelPresets: Record<string, string> = {
   anthropic: 'claude-sonnet-4.5',
 };
 
-const APP_VERSION = 'v0.3.1';
+const APP_VERSION = 'v0.3.2';
 const ROADMAP_URL = 'https://barcelonalake.github.io/hosthtml/artifacts/ai-workspace-roadmap.html';
 const roadmapVersions = [
   { version: 'v0.1', label: 'HTML Prototype', status: 'done', detail: '資訊架構與三欄視覺已驗證。' },
@@ -63,6 +63,51 @@ const roadmapVersions = [
   { version: 'v0.3', label: 'Multi-model Agent', status: 'active', detail: 'AI Gateway、provider adapter、agent run queue、run-to-artifact。' },
   { version: 'v1.0', label: 'Native + Web Stable', status: 'later', detail: 'SwiftUI 原生端與穩定同步。' },
 ] as const;
+
+const featureGuide = [
+  { title: '工作空間與頻道', body: '用工作空間、頻道、會話管理不同 AI 任務，像 Discord 一樣切換產品規劃、Agent 實驗室與成果文件。' },
+  { title: 'AI 對話與模型選擇', body: '在 Agent 執行環境選模型供應商與模型；目前 GitHub Pages 走本地模擬串流，接上 VITE_AI_GATEWAY_URL 後改走真實 SSE。' },
+  { title: 'Agent 執行記錄', body: '每次送出訊息都會生成一筆執行記錄，保留輸入、輸出、模型、狀態與時間，方便追蹤 AI 工作歷史。' },
+  { title: '執行結果轉成果', body: '完成的執行記錄可一鍵保存為 Markdown 成果文件，進一步編輯、複製或匯出 .md。' },
+  { title: '記憶與任務看板', body: '把會話摘要保存為記憶，或轉成任務，讓討論、產出、後續行動形成閉環。' },
+] as const;
+
+
+function zhSyncStatus(status: 'loading' | 'synced' | 'saving' | 'error') {
+  return { loading: '載入中', synced: '已同步', saving: '保存中', error: '錯誤' }[status];
+}
+
+function zhAuthStatus(status: 'loading' | 'ready' | 'error') {
+  return { loading: '載入中', ready: '就緒', error: '錯誤' }[status];
+}
+
+function zhLabel(label: string) {
+  const labels: Record<string, string> = {
+    'Local repository': '本地資料庫',
+    'Supabase connected': 'Supabase 已連線',
+    'Local dev identity': '本地開發身份',
+    'Supabase Auth': 'Supabase 身份驗證',
+    owner: '擁有者',
+    member: '成員',
+    local: '本地',
+    supabase: 'Supabase',
+    todo: '待辦',
+    in_progress: '進行中',
+    blocked: '受阻',
+    done: '完成',
+    user: '使用者',
+    assistant: '助手',
+    system: '系統',
+    running: '執行中',
+    completed: '已完成',
+    failed: '失敗',
+    queued: '排隊中',
+    high: '高',
+    medium: '中',
+    low: '低',
+  };
+  return labels[label] ?? label;
+}
 
 function nowLabel() {
   return new Date().toLocaleTimeString('zh-Hant', { hour: '2-digit', minute: '2-digit' });
@@ -131,10 +176,10 @@ function App() {
   const selectedArtifact = sessionArtifacts[0];
 
   const metrics = useMemo(() => [
-    { label: 'Channels', value: state.channels.length, icon: Hash },
-    { label: 'Sessions', value: state.sessions.length, icon: MessageSquare },
-    { label: 'Artifacts', value: state.artifacts.length, icon: Archive },
-    { label: 'Agent Runs', value: state.agentRuns.length, icon: Cpu },
+    { label: '頻道', value: state.channels.length, icon: Hash },
+    { label: '會話', value: state.sessions.length, icon: MessageSquare },
+    { label: '成果', value: state.artifacts.length, icon: Archive },
+    { label: '執行記錄', value: state.agentRuns.length, icon: Cpu },
   ], [state]);
 
   function setProvider(nextProvider: string) {
@@ -365,37 +410,37 @@ function App() {
         <div>
           <div className="eyebrow"><Sparkles size={14} /> AI Workspace OS · {APP_VERSION}</div>
           <h1>Blackberry</h1>
-          <p>Discord-like AI 工作空間：Session、Artifact、Memory、Task Board 在手機上形成閉環。</p>
+          <p>中文版 AI 工作空間：把對話、模型執行、成果文件、記憶與任務放在同一個手機優先介面。</p>
         </div>
         <div className="status-stack">
-          <div className="status-pill"><Smartphone size={16} /> PWA online</div>
-          <div className="status-pill"><Database size={16} /> {runtime.label} · {syncStatus}</div>
+          <div className="status-pill"><Smartphone size={16} /> PWA 已上線</div>
+          <div className="status-pill"><Database size={16} /> {zhLabel(runtime.label)} · {zhSyncStatus(syncStatus)}</div>
         </div>
       </header>
 
-      {syncStatus === 'error' && <section className="sync-error">Sync error: {syncError}</section>}
-      {authStatus === 'error' && <section className="sync-error">Auth error: {syncError}</section>}
+      {syncStatus === 'error' && <section className="sync-error">同步錯誤： {syncError}</section>}
+      {authStatus === 'error' && <section className="sync-error">身份錯誤： {syncError}</section>}
 
       <section className="auth-card">
-        <div className="panel-title"><UserRound size={18} /> Auth bootstrap</div>
+        <div className="panel-title"><UserRound size={18} /> 身份啟動</div>
         <div>
-          <b>{authSession?.profile.displayName ?? 'Bootstrapping identity…'}</b>
-          <small>{authRuntime.label} · {authStatus}</small>
+          <b>{authSession?.profile.displayName ?? '正在建立身份…'}</b>
+          <small>{zhLabel(authRuntime.label)} · {zhAuthStatus(authStatus)}</small>
         </div>
         <div>
-          <b>{authSession?.workspace.name ?? 'Workspace pending'}</b>
-          <small>{authSession?.membership.role ?? 'member'} · {authSession?.workspace.slug ?? 'no-slug'}</small>
+          <b>{authSession?.workspace.name ?? '工作空間準備中'}</b>
+          <small>{zhLabel(authSession?.membership.role ?? 'member')} · {authSession?.workspace.slug ?? 'no-slug'}</small>
         </div>
-        <button className="ghost compact" onClick={resetAuthIdentity} disabled={authStatus === 'loading'}>Refresh identity</button>
+        <button className="ghost compact" onClick={resetAuthIdentity} disabled={authStatus === 'loading'}>刷新身份</button>
       </section>
 
       <section className="roadmap-card">
         <div className="roadmap-head">
           <div>
-            <div className="panel-title"><Rocket size={18} /> Version roadmap</div>
-            <p>參考 roadmap：目前標注為 <b>{APP_VERSION}</b>，持續推進 v0.3 Multi-model Agent；本版加入 Agent Run 一鍵轉 Artifact 與 retry loop。</p>
+            <div className="panel-title"><Rocket size={18} /> 版本路線圖</div>
+            <p>參考 roadmap：目前標注為 <b>{APP_VERSION}</b>，本版完成中文版介面與功能說明，保留 v0.3 多模型 Agent 工作流。</p>
           </div>
-          <a href={ROADMAP_URL} target="_blank" rel="noreferrer">Open roadmap</a>
+          <a href={ROADMAP_URL} target="_blank" rel="noreferrer">打開路線圖</a>
         </div>
         <div className="roadmap-strip">
           {roadmapVersions.map((item) => (
@@ -408,20 +453,35 @@ function App() {
         </div>
       </section>
 
+      <section className="feature-guide-card">
+        <div className="feature-guide-head">
+          <div className="panel-title"><FileText size={18} /> 功能說明</div>
+          <p>這個網站是手機優先的 AI 工作空間，不只是聊天框；目標是把需求、AI 執行、成果文件、記憶與任務串成可追蹤流程。</p>
+        </div>
+        <div className="feature-guide-grid">
+          {featureGuide.map((feature) => (
+            <article key={feature.title}>
+              <b>{feature.title}</b>
+              <p>{feature.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <section className="agent-runtime-card">
         <div>
-          <div className="panel-title"><Cpu size={18} /> Agent Runtime</div>
-          <p>{gateway.runtime.mode === 'sse' ? 'SSE gateway connected' : 'Local mock stream；v0.3.1 支援 run → artifact 與 retry。'}</p>
+          <div className="panel-title"><Cpu size={18} /> Agent 執行環境</div>
+          <p>{gateway.runtime.mode === 'sse' ? 'SSE 閘道已連線' : '本地模擬串流；v0.3.2 提供中文版與功能說明。'}</p>
           <small>{gateway.runtime.endpointLabel}</small>
         </div>
         <label>
-          Provider
+          模型供應商
           <select value={selectedProvider} onChange={(event) => setProvider(event.target.value)}>
             {providerOptions.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
           </select>
         </label>
         <label>
-          Model
+          模型
           <input value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} />
         </label>
       </section>
@@ -432,10 +492,10 @@ function App() {
 
       <section className="workspace-grid">
         <aside className="sidebar card-panel">
-          <div className="panel-title"><Layers3 size={18} /> Workspace</div>
-          <button className="primary-action"><Plus size={16} /> New Workspace</button>
-          <button className="ghost" onClick={resetWorkspace} disabled={syncStatus === 'loading'}><RefreshCcw size={14} /> Reset data</button>
-          <div className="section-label">Channels</div>
+          <div className="panel-title"><Layers3 size={18} /> 工作空間</div>
+          <button className="primary-action"><Plus size={16} /> 新增工作空間</button>
+          <button className="ghost" onClick={resetWorkspace} disabled={syncStatus === 'loading'}><RefreshCcw size={14} /> 重置資料</button>
+          <div className="section-label">頻道</div>
           {state.channels.map((channel) => (
             <button
               className={`channel-row ${channel.id === activeChannelId ? 'active' : ''}`}
@@ -453,7 +513,7 @@ function App() {
 
         <section className="session-list card-panel">
           <div className="panel-title"><MessageSquare size={18} /> {activeChannel?.name}</div>
-          <button className="primary-action" onClick={createSession} disabled={syncStatus === 'loading'}><Plus size={16} /> New Session</button>
+          <button className="primary-action" onClick={createSession} disabled={syncStatus === 'loading'}><Plus size={16} /> 新增會話</button>
           {channelSessions.map((session) => (
             <button className={`session-row ${session.id === activeSession?.id ? 'active' : ''}`} key={session.id} onClick={() => setActiveSessionId(session.id)}>
               <span className="session-kind">{session.kind}</span>
@@ -470,38 +530,38 @@ function App() {
               <div className="panel-title"><Bot size={18} /> {activeSession?.title}</div>
               <p>{activeSession?.summary}</p>
             </div>
-            <button onClick={addTaskFromSession} disabled={syncStatus === 'loading'}><Workflow size={16} /> Task</button>
-            <button onClick={createArtifactFromSession} disabled={syncStatus === 'loading'}><Archive size={16} /> Artifact v{Math.max(0, ...sessionArtifacts.map((artifact) => artifact.version)) + 1}</button>
+            <button onClick={addTaskFromSession} disabled={syncStatus === 'loading'}><Workflow size={16} /> 任務</button>
+            <button onClick={createArtifactFromSession} disabled={syncStatus === 'loading'}><Archive size={16} /> 成果 v{Math.max(0, ...sessionArtifacts.map((artifact) => artifact.version)) + 1}</button>
           </div>
 
           <div className="messages">
             {messages.map((message) => (
               <article className={`message ${message.role}`} key={message.id}>
-                <div><b>{message.role}</b><time>{message.time}</time></div>
-                <p>{message.content || (message.role === 'assistant' && isStreaming ? 'Streaming…' : '')}</p>
+                <div><b>{zhLabel(message.role)}</b><time>{message.time}</time></div>
+                <p>{message.content || (message.role === 'assistant' && isStreaming ? '串流中…' : '')}</p>
               </article>
             ))}
           </div>
 
           <div className="composer">
-            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="輸入需求：例如『把這段回答轉成 artifact』" />
-            <button onClick={sendMessage} disabled={isStreaming || syncStatus === 'loading'}><Send size={18} /> {isStreaming ? 'Streaming' : 'Send'}</button>
+            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="輸入需求：例如『把這段回答轉成成果文件』" />
+            <button onClick={sendMessage} disabled={isStreaming || syncStatus === 'loading'}><Send size={18} /> {isStreaming ? '串流中' : '送出'}</button>
           </div>
         </section>
 
         <aside className="context-panel card-panel">
-          <div className="panel-title"><PanelRight size={18} /> Context Panel</div>
+          <div className="panel-title"><PanelRight size={18} /> 上下文面板</div>
 
           <section>
-            <h2><Archive size={16} /> Artifacts</h2>
-            <button className="ghost" onClick={createArtifactFromSession} disabled={syncStatus === 'loading'}><Plus size={14} /> Save artifact v{Math.max(0, ...sessionArtifacts.map((artifact) => artifact.version)) + 1}</button>
+            <h2><Archive size={16} /> 成果文件</h2>
+            <button className="ghost" onClick={createArtifactFromSession} disabled={syncStatus === 'loading'}><Plus size={14} /> 保存成果 v{Math.max(0, ...sessionArtifacts.map((artifact) => artifact.version)) + 1}</button>
             {selectedArtifact && (
               <div className="artifact-workbench">
                 <div className="artifact-toolbar">
-                  <span>Editing v{selectedArtifact.version}</span>
-                  <button onClick={updateSelectedArtifactContent} disabled={syncStatus === 'loading'}><FileText size={14} /> Update</button>
-                  <button onClick={copySelectedArtifact}><Clipboard size={14} /> Copy</button>
-                  <button onClick={downloadSelectedArtifact}><Archive size={14} /> Export .md</button>
+                  <span>編輯 v{selectedArtifact.version}</span>
+                  <button onClick={updateSelectedArtifactContent} disabled={syncStatus === 'loading'}><FileText size={14} /> 更新</button>
+                  <button onClick={copySelectedArtifact}><Clipboard size={14} /> 複製</button>
+                  <button onClick={downloadSelectedArtifact}><Archive size={14} /> 匯出 .md</button>
                 </div>
                 <textarea value={artifactDraft} onChange={(event) => setArtifactDraft(event.target.value)} aria-label="Artifact editor" />
                 <p className="artifact-preview">{artifactDraft}</p>
@@ -512,32 +572,32 @@ function App() {
           </section>
 
           <section>
-            <h2><Brain size={16} /> Memories</h2>
-            <button className="ghost" onClick={addMemoryFromSession} disabled={syncStatus === 'loading'}><Plus size={14} /> Save current session</button>
+            <h2><Brain size={16} /> 記憶</h2>
+            <button className="ghost" onClick={addMemoryFromSession} disabled={syncStatus === 'loading'}><Plus size={14} /> 保存目前會話</button>
             {state.memories.map((memory) => <article className="mini-card" key={memory.id}><Circle size={12} className={memory.active ? 'green' : ''} /><b>{memory.title}</b><p>{memory.content}</p></article>)}
           </section>
 
           <section>
-            <h2><Cpu size={16} /> Agent Runs</h2>
+            <h2><Cpu size={16} /> Agent 執行記錄</h2>
             {state.agentRuns.filter((run) => run.sessionId === activeSession?.id).map((run) => (
               <article className={`agent-run ${run.status}`} key={run.id}>
                 <b>{run.provider}/{run.model}</b>
-                <small>{run.status} · {run.startedAt}{run.completedAt ? ` → ${run.completedAt}` : ''}</small>
+                <small>{zhLabel(run.status)} · {run.startedAt}{run.completedAt ? ` → ${run.completedAt}` : ''}</small>
                 <p>{run.output || run.input}</p>
                 <div className="agent-run-actions">
-                  <button onClick={() => saveAgentRunAsArtifact(run)} disabled={syncStatus === 'loading'}><Archive size={13} /> Save artifact</button>
-                  <button onClick={() => retryAgentRun(run)} disabled={isStreaming || syncStatus === 'loading'}><RefreshCcw size={13} /> Retry</button>
+                  <button onClick={() => saveAgentRunAsArtifact(run)} disabled={syncStatus === 'loading'}><Archive size={13} /> 保存成果</button>
+                  <button onClick={() => retryAgentRun(run)} disabled={isStreaming || syncStatus === 'loading'}><RefreshCcw size={13} /> 重跑</button>
                 </div>
               </article>
             ))}
           </section>
 
           <section>
-            <h2><CheckCircle2 size={16} /> Task Board</h2>
+            <h2><CheckCircle2 size={16} /> 任務看板</h2>
             {(['todo', 'in_progress', 'blocked', 'done'] as Task['status'][]).map((status) => (
               <div className="task-column" key={status}>
-                <span>{status.replace('_', ' ')}</span>
-                {state.tasks.filter((task) => task.status === status).map((task) => <article className="task" key={task.id}><Code2 size={14} /><b>{task.title}</b><small>{task.priority}</small></article>)}
+                <span>{zhLabel(status)}</span>
+                {state.tasks.filter((task) => task.status === status).map((task) => <article className="task" key={task.id}><Code2 size={14} /><b>{task.title}</b><small>{zhLabel(task.priority)}</small></article>)}
               </div>
             ))}
           </section>
@@ -545,13 +605,15 @@ function App() {
       </section>
 
       <footer>
-        <Rocket size={16} /> {APP_VERSION}: Agent Runs 可一鍵保存為 Artifact 並支援 retry；Next: backend-hosted AI Gateway contract.
+        <Rocket size={16} /> {APP_VERSION}: 已完成中文版介面與功能說明；Next: backend-hosted AI Gateway contract.
       </footer>
     </main>
   );
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
+
+
 
 
 
