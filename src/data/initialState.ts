@@ -2,64 +2,44 @@ import type { WorkspaceState } from '../domain/types';
 
 export const initialState: WorkspaceState = {
   channels: [
-    { id: 'product', name: 'product', description: '產品定位、PRD、roadmap、決策記錄', kind: 'planning' },
-    { id: 'agent-lab', name: 'agent-lab', description: 'Claude Code / Codex / Hermes 任務執行', kind: 'agent' },
-    { id: 'artifacts', name: 'artifacts', description: 'HTML、Markdown、code、diagram、prompt template', kind: 'artifact' },
+    { id: 'product', name: '規劃', description: '產品想法、需求、決策', kind: 'planning' },
+    { id: 'agent-lab', name: '執行', description: 'AI 任務、模型執行、重跑', kind: 'agent' },
+    { id: 'artifacts', name: '成果', description: '文件、摘要、可交付內容', kind: 'artifact' },
   ],
   sessions: [
     {
       id: 's1',
       channelId: 'product',
-      title: 'AI Workspace OS v0.1 閉環設計',
+      title: '產品工作區',
       kind: 'design',
       status: 'active',
       model: 'kimi-k2.6:cloud',
-      summary: '人提出問題 → AI 工作 → artifact → memory → task → 回到 session 執行。',
+      summary: '把想法、對話、成果、記憶與任務集中整理。',
     },
     {
       id: 's2',
       channelId: 'agent-lab',
-      title: 'Blackberry PWA 第一版實作',
-      kind: 'coding-agent',
+      title: 'AI 執行區',
+      kind: 'agent',
       status: 'active',
-      model: 'claude-code',
-      summary: '建立手機優先 workspace shell，預留 Supabase 與 AI Gateway。',
+      model: 'kimi-k2.6:cloud',
+      summary: '輸入需求，保存 AI 執行結果，必要時重跑或轉成成果文件。',
     },
   ],
   messages: [
-    { id: 'm1', sessionId: 's1', role: 'user', content: '根據 AI Workspace OS 文檔，先做 v0.1 的可操作產品外殼。', time: '09:20' },
-    { id: 'm2', sessionId: 's1', role: 'assistant', content: '已拆成 Workspace / Channel / Session / Message / Artifact / Memory / Task 的核心資訊架構，先用 PWA 驗證。', time: '09:21' },
-    { id: 'm3', sessionId: 's2', role: 'assistant', content: '下一步會接入 Supabase Auth、session persistence、AI Gateway SSE streaming。', time: '09:24' },
+    { id: 'm1', sessionId: 's1', role: 'assistant', content: '這裡可以整理產品想法、討論記錄與下一步任務。', time: '09:20' },
+    { id: 'm2', sessionId: 's2', role: 'assistant', content: '輸入需求後，結果會保存在執行記錄，也可以轉成成果文件。', time: '09:24' },
   ],
   artifacts: [
-    { id: 'a1', sessionId: 's1', title: 'v0.1 Product Architecture', kind: 'markdown', version: 1, content: 'PRD / data model / architecture docs 已落在 docs/。' },
-    { id: 'a2', sessionId: 's2', title: 'Supabase initial schema', kind: 'sql', version: 1, content: '0001_initial_schema.sql 建立 profiles、workspaces、channels、sessions、messages、artifacts、memories、tasks、agent_runs。' },
+    { id: 'a1', sessionId: 's1', title: '產品整理筆記', kind: 'markdown', version: 1, content: '在這裡保存可編輯的產品筆記、摘要與交付文件。' },
   ],
   memories: [
-    { id: 'mem1', title: '交付偏好', content: '手機優先，所有成果要能用 URL 在手機打開驗收。', scope: 'workspace', active: true },
-    { id: 'mem2', title: '產品方向', content: '不是普通聊天工具，而是 AI 工作空間。', scope: 'workspace', active: true },
+    { id: 'mem1', title: '使用偏好', content: '手機優先，成果要能直接打開使用。', scope: 'workspace', active: true },
   ],
   tasks: [
-    { id: 't1', title: '建立 repo 結構與 docs', status: 'done', priority: 'high', sessionId: 's2' },
-    { id: 't2', title: '建立 Supabase migration draft', status: 'done', priority: 'high', sessionId: 's2' },
-    { id: 't3', title: '實作手機版 Workspace Shell', status: 'in_progress', priority: 'high', sessionId: 's2' },
-    { id: 't4', title: '接 AI Gateway SSE streaming', status: 'done', priority: 'medium', sessionId: 's1' },
-    { id: 't5', title: '建立 v0.3 provider adapter 與 agent run queue', status: 'done', priority: 'high', sessionId: 's2' },
-    { id: 't6', title: 'v0.3.1 Agent Run 轉 Artifact 與 retry loop', status: 'in_progress', priority: 'high', sessionId: 's2' },
+    { id: 't1', title: '整理今天要完成的工作', status: 'todo', priority: 'high', sessionId: 's1' },
+    { id: 't2', title: '把重要輸出保存成成果文件', status: 'in_progress', priority: 'medium', sessionId: 's2' },
+    { id: 't3', title: '複查可交付內容', status: 'done', priority: 'medium', sessionId: 's1' },
   ],
-  agentRuns: [
-    {
-      id: 'run1',
-      sessionId: 's2',
-      provider: 'mock',
-      model: 'gateway/mock-stream',
-      status: 'completed',
-      input: '建立 v0.3 agent runtime',
-      output: '已規劃 provider adapter、agent run queue、SSE fallback；下一步把 run output 轉成可編輯 Artifact。',
-      startedAt: '09:30',
-      completedAt: '09:31',
-    },
-  ],
+  agentRuns: [],
 };
-
-

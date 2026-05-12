@@ -47,7 +47,7 @@ export class AIGatewayClient {
 
     if (!this.baseUrl.trim()) {
       const latest = request.messages.at(-1)?.content ?? '';
-      const response = `Agent run ${request.runId ?? 'local'} · ${provider}/${model} 已接收：${latest}。v0.3 已切到 provider adapter 介面；設定 VITE_AI_GATEWAY_URL 後會改走真實 SSE。`;
+      const response = `已收到：${latest}。我會把重點整理成可保存的工作內容；你可以繼續追問，或把結果保存為成果文件。`;
       for (const token of response.split('')) {
         await new Promise((resolve) => setTimeout(resolve, 6));
         yield { delta: token, done: false };

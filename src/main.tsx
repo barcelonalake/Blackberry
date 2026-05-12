@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import {
   Archive,
@@ -17,11 +17,7 @@ import {
   PanelRight,
   Plus,
   RefreshCcw,
-  Rocket,
   Send,
-  Sparkles,
-  Smartphone,
-  UserRound,
   Workflow,
 } from 'lucide-react';
 import type { AgentRun, Artifact, Memory, Message, Session, Task, WorkspaceState } from './domain/types';
@@ -46,7 +42,8 @@ const runtime = createWorkspaceRuntime({
 const authRuntime = createAuthRuntime({ env, storage: window.localStorage });
 const repository = runtime.repository;
 const gateway = new AIGatewayClient();
-const providerOptions = ['mock', 'kimi', 'deepseek', 'openai', 'anthropic'] as const;
+const DIRECT_USE_RELEASE_KEY = 'blackberry.direct-use-clean.v1';
+const providerOptions = ['kimi', 'deepseek', 'openai', 'anthropic'] as const;
 const modelPresets: Record<string, string> = {
   mock: 'gateway/mock-stream',
   kimi: 'kimi-k2.6:cloud',
@@ -54,23 +51,6 @@ const modelPresets: Record<string, string> = {
   openai: 'gpt-5.5',
   anthropic: 'claude-sonnet-4.5',
 };
-
-const APP_VERSION = 'v0.3.2';
-const ROADMAP_URL = 'https://barcelonalake.github.io/hosthtml/artifacts/ai-workspace-roadmap.html';
-const roadmapVersions = [
-  { version: 'v0.1', label: 'HTML Prototype', status: 'done', detail: '資訊架構與三欄視覺已驗證。' },
-  { version: 'v0.2', label: 'Web MVP', status: 'done', detail: 'PWA、local persistence、Auth bootstrap、Artifact 編輯與匯出。' },
-  { version: 'v0.3', label: 'Multi-model Agent', status: 'active', detail: 'AI Gateway、provider adapter、agent run queue、run-to-artifact。' },
-  { version: 'v1.0', label: 'Native + Web Stable', status: 'later', detail: 'SwiftUI 原生端與穩定同步。' },
-] as const;
-
-const featureGuide = [
-  { title: '工作空間與頻道', body: '用工作空間、頻道、會話管理不同 AI 任務，像 Discord 一樣切換產品規劃、Agent 實驗室與成果文件。' },
-  { title: 'AI 對話與模型選擇', body: '在 Agent 執行環境選模型供應商與模型；目前 GitHub Pages 走本地模擬串流，接上 VITE_AI_GATEWAY_URL 後改走真實 SSE。' },
-  { title: 'Agent 執行記錄', body: '每次送出訊息都會生成一筆執行記錄，保留輸入、輸出、模型、狀態與時間，方便追蹤 AI 工作歷史。' },
-  { title: '執行結果轉成果', body: '完成的執行記錄可一鍵保存為 Markdown 成果文件，進一步編輯、複製或匯出 .md。' },
-  { title: '記憶與任務看板', body: '把會話摘要保存為記憶，或轉成任務，讓討論、產出、後續行動形成閉環。' },
-] as const;
 
 
 function zhSyncStatus(status: 'loading' | 'synced' | 'saving' | 'error') {
@@ -125,8 +105,9 @@ function App() {
   const [syncError, setSyncError] = useState('');
   const [artifactDraft, setArtifactDraft] = useState('');
   const [artifactNotice, setArtifactNotice] = useState('');
-  const [selectedProvider, setSelectedProvider] = useState(gateway.runtime.provider);
-  const [selectedModel, setSelectedModel] = useState(gateway.runtime.model);
+  const initialProvider = gateway.runtime.provider === 'mock' ? 'kimi' : gateway.runtime.provider;
+  const [selectedProvider, setSelectedProvider] = useState(initialProvider);
+  const [selectedModel, setSelectedModel] = useState(modelPresets[initialProvider] ?? gateway.runtime.model);
   const stateRef = useRef(state);
 
   useEffect(() => {
@@ -151,7 +132,9 @@ function App() {
     let cancelled = false;
     async function bootstrap() {
       try {
-        const loaded = await repository.load();
+        const shouldResetLocalData = runtime.backend === 'local' && !window.localStorage.getItem(DIRECT_USE_RELEASE_KEY);
+        const loaded = shouldResetLocalData ? await repository.reset() : await repository.load();
+        if (runtime.backend === 'local') window.localStorage.setItem(DIRECT_USE_RELEASE_KEY, '1');
         if (cancelled) return;
         stateRef.current = loaded;
         setState(loaded);
@@ -175,12 +158,6 @@ function App() {
   const sessionArtifacts = state.artifacts.filter((artifact) => artifact.sessionId === activeSession?.id);
   const selectedArtifact = sessionArtifacts[0];
 
-  const metrics = useMemo(() => [
-    { label: '頻道', value: state.channels.length, icon: Hash },
-    { label: '會話', value: state.sessions.length, icon: MessageSquare },
-    { label: '成果', value: state.artifacts.length, icon: Archive },
-    { label: '執行記錄', value: state.agentRuns.length, icon: Cpu },
-  ], [state]);
 
   function setProvider(nextProvider: string) {
     setSelectedProvider(nextProvider);
@@ -282,7 +259,7 @@ function App() {
       updateAgentRun(runId, { status: 'completed', completedAt: nowLabel() });
     } catch (error) {
       const current = stateRef.current;
-      const errorText = `AI Gateway error: ${String(error)}`;
+      const errorText = `執行失敗：${String(error)}`;
       const nextMessages = current.messages.map((message) =>
         message.id === assistantId ? { ...message, content: errorText } : message,
       );
@@ -309,13 +286,13 @@ function App() {
     const nextArtifact: Artifact = {
       id: `a${Date.now()}`,
       sessionId: activeSession.id,
-      title: `${activeSession.title} · ${APP_VERSION} artifact`,
+      title: `${activeSession.title} · 成果文件`,
       kind: 'markdown',
       version: nextVersion,
       content,
     };
     setArtifactDraft(content);
-    setArtifactNotice(`Artifact v${nextVersion} saved`);
+    setArtifactNotice('成果已保存');
     persist({ ...state, artifacts: [nextArtifact, ...state.artifacts] });
   }
 
@@ -328,13 +305,13 @@ function App() {
     const nextArtifact: Artifact = {
       id: `a${Date.now()}`,
       sessionId: run.sessionId,
-      title: `${session.title} · ${run.provider}/${run.model} run artifact`,
+      title: `${session.title} · 執行結果`,
       kind: 'markdown',
       version: nextVersion,
-      content: `# Agent Run Artifact\n\n- Provider: ${run.provider}\n- Model: ${run.model}\n- Status: ${run.status}\n- Started: ${run.startedAt}${run.completedAt ? `\n- Completed: ${run.completedAt}` : ''}\n\n## Input\n${run.input}\n\n## Output\n${content}`,
+      content: `# 執行結果\n\n## 需求\n${run.input}\n\n## 回答\n${content}`,
     };
     setArtifactDraft(nextArtifact.content);
-    setArtifactNotice(`Agent run saved as Artifact v${nextVersion}`);
+    setArtifactNotice('執行結果已保存為成果');
     persist({ ...state, artifacts: [nextArtifact, ...state.artifacts] });
   }
 
@@ -351,7 +328,7 @@ function App() {
     const nextArtifacts = state.artifacts.map((artifact) =>
       artifact.id === selectedArtifact.id ? { ...artifact, content: artifactDraft } : artifact,
     );
-    setArtifactNotice(`Artifact v${selectedArtifact.version} updated`);
+    setArtifactNotice('成果已更新');
     persist({ ...state, artifacts: nextArtifacts });
   }
 
@@ -359,9 +336,9 @@ function App() {
     if (!selectedArtifact) return;
     try {
       await navigator.clipboard.writeText(selectedArtifact.content);
-      setArtifactNotice(`Artifact v${selectedArtifact.version} copied`);
+      setArtifactNotice('成果已複製');
     } catch {
-      setArtifactNotice('Copy unavailable in this browser');
+      setArtifactNotice('此瀏覽器無法複製');
     }
   }
 
@@ -371,12 +348,12 @@ function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${selectedArtifact.title.replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '-').slice(0, 60)}-v${selectedArtifact.version}.md`;
+    link.download = `${selectedArtifact.title.replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '-').slice(0, 60)}.md`;
     document.body.appendChild(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    setArtifactNotice(`Artifact v${selectedArtifact.version} exported`);
+    setArtifactNotice('成果已匯出');
   }
 
   useEffect(() => {
@@ -406,14 +383,12 @@ function App() {
 
   return (
     <main className="workspace-shell">
-      <header className="topbar">
+      <header className="topbar clean-topbar">
         <div>
-          <div className="eyebrow"><Sparkles size={14} /> AI Workspace OS · {APP_VERSION}</div>
           <h1>Blackberry</h1>
-          <p>中文版 AI 工作空間：把對話、模型執行、成果文件、記憶與任務放在同一個手機優先介面。</p>
+          <p>AI 工作空間：對話、模型執行、成果文件、記憶與任務集中管理。</p>
         </div>
         <div className="status-stack">
-          <div className="status-pill"><Smartphone size={16} /> PWA 已上線</div>
           <div className="status-pill"><Database size={16} /> {zhLabel(runtime.label)} · {zhSyncStatus(syncStatus)}</div>
         </div>
       </header>
@@ -421,81 +396,14 @@ function App() {
       {syncStatus === 'error' && <section className="sync-error">同步錯誤： {syncError}</section>}
       {authStatus === 'error' && <section className="sync-error">身份錯誤： {syncError}</section>}
 
-      <section className="auth-card">
-        <div className="panel-title"><UserRound size={18} /> 身份啟動</div>
-        <div>
-          <b>{authSession?.profile.displayName ?? '正在建立身份…'}</b>
-          <small>{zhLabel(authRuntime.label)} · {zhAuthStatus(authStatus)}</small>
-        </div>
-        <div>
-          <b>{authSession?.workspace.name ?? '工作空間準備中'}</b>
-          <small>{zhLabel(authSession?.membership.role ?? 'member')} · {authSession?.workspace.slug ?? 'no-slug'}</small>
-        </div>
-        <button className="ghost compact" onClick={resetAuthIdentity} disabled={authStatus === 'loading'}>刷新身份</button>
-      </section>
-
-      <section className="roadmap-card">
-        <div className="roadmap-head">
-          <div>
-            <div className="panel-title"><Rocket size={18} /> 版本路線圖</div>
-            <p>參考 roadmap：目前標注為 <b>{APP_VERSION}</b>，本版完成中文版介面與功能說明，保留 v0.3 多模型 Agent 工作流。</p>
-          </div>
-          <a href={ROADMAP_URL} target="_blank" rel="noreferrer">打開路線圖</a>
-        </div>
-        <div className="roadmap-strip">
-          {roadmapVersions.map((item) => (
-            <article className={`version-card ${item.status}`} key={item.version}>
-              <span>{item.version}</span>
-              <b>{item.label}</b>
-              <small>{item.detail}</small>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="feature-guide-card">
-        <div className="feature-guide-head">
-          <div className="panel-title"><FileText size={18} /> 功能說明</div>
-          <p>這個網站是手機優先的 AI 工作空間，不只是聊天框；目標是把需求、AI 執行、成果文件、記憶與任務串成可追蹤流程。</p>
-        </div>
-        <div className="feature-guide-grid">
-          {featureGuide.map((feature) => (
-            <article key={feature.title}>
-              <b>{feature.title}</b>
-              <p>{feature.body}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="agent-runtime-card">
-        <div>
-          <div className="panel-title"><Cpu size={18} /> Agent 執行環境</div>
-          <p>{gateway.runtime.mode === 'sse' ? 'SSE 閘道已連線' : '本地模擬串流；v0.3.2 提供中文版與功能說明。'}</p>
-          <small>{gateway.runtime.endpointLabel}</small>
-        </div>
-        <label>
-          模型供應商
-          <select value={selectedProvider} onChange={(event) => setProvider(event.target.value)}>
-            {providerOptions.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
-          </select>
-        </label>
-        <label>
-          模型
-          <input value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} />
-        </label>
-      </section>
-
-      <section className="metrics">
-        {metrics.map(({ label, value, icon: Icon }) => <article key={label}><Icon size={18} /><strong>{value}</strong><span>{label}</span></article>)}
-      </section>
-
       <section className="workspace-grid">
-        <aside className="sidebar card-panel">
-          <div className="panel-title"><Layers3 size={18} /> 工作空間</div>
-          <button className="primary-action"><Plus size={16} /> 新增工作空間</button>
-          <button className="ghost" onClick={resetWorkspace} disabled={syncStatus === 'loading'}><RefreshCcw size={14} /> 重置資料</button>
-          <div className="section-label">頻道</div>
+        <aside className="sidebar card-panel app-menu">
+          <div className="brand-block">
+            <div className="panel-title"><Layers3 size={18} /> Blackberry</div>
+            <small>AI 工作空間</small>
+          </div>
+
+          <div className="section-label">選單</div>
           {state.channels.map((channel) => (
             <button
               className={`channel-row ${channel.id === activeChannelId ? 'active' : ''}`}
@@ -509,17 +417,31 @@ function App() {
               <span><b>{channel.name}</b><small>{channel.description}</small></span>
             </button>
           ))}
-        </aside>
 
+          <div className="menu-actions">
+            <button className="primary-action" onClick={createSession} disabled={syncStatus === 'loading'}><Plus size={16} /> 新增會話</button>
+            <button className="ghost" onClick={resetWorkspace} disabled={syncStatus === 'loading'}><RefreshCcw size={14} /> 重置資料</button>
+          </div>
+
+          <div className="menu-model">
+            <div className="panel-title"><Cpu size={18} /> 模型</div>
+            <label>供應商
+              <select value={selectedProvider} onChange={(event) => setProvider(event.target.value)}>
+                {providerOptions.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
+              </select>
+            </label>
+            <label>模型
+              <input value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} />
+            </label>
+          </div>
+        </aside>
         <section className="session-list card-panel">
           <div className="panel-title"><MessageSquare size={18} /> {activeChannel?.name}</div>
-          <button className="primary-action" onClick={createSession} disabled={syncStatus === 'loading'}><Plus size={16} /> 新增會話</button>
           {channelSessions.map((session) => (
             <button className={`session-row ${session.id === activeSession?.id ? 'active' : ''}`} key={session.id} onClick={() => setActiveSessionId(session.id)}>
               <span className="session-kind">{session.kind}</span>
               <b>{session.title}</b>
               <small>{session.summary}</small>
-              <em>{session.model}</em>
             </button>
           ))}
         </section>
@@ -531,7 +453,7 @@ function App() {
               <p>{activeSession?.summary}</p>
             </div>
             <button onClick={addTaskFromSession} disabled={syncStatus === 'loading'}><Workflow size={16} /> 任務</button>
-            <button onClick={createArtifactFromSession} disabled={syncStatus === 'loading'}><Archive size={16} /> 成果 v{Math.max(0, ...sessionArtifacts.map((artifact) => artifact.version)) + 1}</button>
+            <button onClick={createArtifactFromSession} disabled={syncStatus === 'loading'}><Archive size={16} /> 保存成果</button>
           </div>
 
           <div className="messages">
@@ -554,11 +476,11 @@ function App() {
 
           <section>
             <h2><Archive size={16} /> 成果文件</h2>
-            <button className="ghost" onClick={createArtifactFromSession} disabled={syncStatus === 'loading'}><Plus size={14} /> 保存成果 v{Math.max(0, ...sessionArtifacts.map((artifact) => artifact.version)) + 1}</button>
+            <button className="ghost" onClick={createArtifactFromSession} disabled={syncStatus === 'loading'}><Plus size={14} /> 保存成果</button>
             {selectedArtifact && (
               <div className="artifact-workbench">
                 <div className="artifact-toolbar">
-                  <span>編輯 v{selectedArtifact.version}</span>
+                  <span>編輯成果</span>
                   <button onClick={updateSelectedArtifactContent} disabled={syncStatus === 'loading'}><FileText size={14} /> 更新</button>
                   <button onClick={copySelectedArtifact}><Clipboard size={14} /> 複製</button>
                   <button onClick={downloadSelectedArtifact}><Archive size={14} /> 匯出 .md</button>
@@ -568,7 +490,7 @@ function App() {
                 {artifactNotice && <small className="artifact-notice">{artifactNotice}</small>}
               </div>
             )}
-            {sessionArtifacts.map((artifact) => <article className="mini-card" key={artifact.id}><FileText size={15} /><b>{artifact.title}</b><small>{artifact.kind} · v{artifact.version}</small><p>{artifact.content}</p></article>)}
+            {sessionArtifacts.map((artifact) => <article className="mini-card" key={artifact.id}><FileText size={15} /><b>{artifact.title}</b><small>{artifact.kind}</small><p>{artifact.content}</p></article>)}
           </section>
 
           <section>
@@ -604,9 +526,6 @@ function App() {
         </aside>
       </section>
 
-      <footer>
-        <Rocket size={16} /> {APP_VERSION}: 已完成中文版介面與功能說明；Next: backend-hosted AI Gateway contract.
-      </footer>
     </main>
   );
 }
