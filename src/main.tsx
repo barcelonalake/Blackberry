@@ -55,12 +55,12 @@ const modelPresets: Record<string, string> = {
   anthropic: 'claude-sonnet-4.5',
 };
 
-const APP_VERSION = 'v0.3.0';
+const APP_VERSION = 'v0.3.1';
 const ROADMAP_URL = 'https://barcelonalake.github.io/hosthtml/artifacts/ai-workspace-roadmap.html';
 const roadmapVersions = [
   { version: 'v0.1', label: 'HTML Prototype', status: 'done', detail: '資訊架構與三欄視覺已驗證。' },
   { version: 'v0.2', label: 'Web MVP', status: 'done', detail: 'PWA、local persistence、Auth bootstrap、Artifact 編輯與匯出。' },
-  { version: 'v0.3', label: 'Multi-model Agent', status: 'active', detail: 'AI Gateway、provider adapter、agent run queue。' },
+  { version: 'v0.3', label: 'Multi-model Agent', status: 'active', detail: 'AI Gateway、provider adapter、agent run queue、run-to-artifact。' },
   { version: 'v1.0', label: 'Native + Web Stable', status: 'later', detail: 'SwiftUI 原生端與穩定同步。' },
 ] as const;
 
@@ -274,6 +274,33 @@ function App() {
     persist({ ...state, artifacts: [nextArtifact, ...state.artifacts] });
   }
 
+  function saveAgentRunAsArtifact(run: AgentRun) {
+    const session = state.sessions.find((item) => item.id === run.sessionId) ?? activeSession;
+    if (!session) return;
+    const artifactsForRunSession = state.artifacts.filter((artifact) => artifact.sessionId === run.sessionId);
+    const nextVersion = Math.max(0, ...artifactsForRunSession.map((artifact) => artifact.version)) + 1;
+    const content = run.output.trim() || run.input.trim();
+    const nextArtifact: Artifact = {
+      id: `a${Date.now()}`,
+      sessionId: run.sessionId,
+      title: `${session.title} · ${run.provider}/${run.model} run artifact`,
+      kind: 'markdown',
+      version: nextVersion,
+      content: `# Agent Run Artifact\n\n- Provider: ${run.provider}\n- Model: ${run.model}\n- Status: ${run.status}\n- Started: ${run.startedAt}${run.completedAt ? `\n- Completed: ${run.completedAt}` : ''}\n\n## Input\n${run.input}\n\n## Output\n${content}`,
+    };
+    setArtifactDraft(nextArtifact.content);
+    setArtifactNotice(`Agent run saved as Artifact v${nextVersion}`);
+    persist({ ...state, artifacts: [nextArtifact, ...state.artifacts] });
+  }
+
+  function retryAgentRun(run: AgentRun) {
+    if (isStreaming || syncStatus === 'loading') return;
+    setActiveSessionId(run.sessionId);
+    setSelectedProvider(run.provider);
+    setSelectedModel(run.model);
+    setDraft(run.input);
+  }
+
   function updateSelectedArtifactContent() {
     if (!selectedArtifact) return;
     const nextArtifacts = state.artifacts.map((artifact) =>
@@ -366,7 +393,7 @@ function App() {
         <div className="roadmap-head">
           <div>
             <div className="panel-title"><Rocket size={18} /> Version roadmap</div>
-            <p>參考 roadmap：目前標注為 <b>{APP_VERSION}</b>，正式進入 v0.3 Multi-model Agent；本版加入 provider adapter、Agent Runs queue 與 SSE fallback。</p>
+            <p>參考 roadmap：目前標注為 <b>{APP_VERSION}</b>，持續推進 v0.3 Multi-model Agent；本版加入 Agent Run 一鍵轉 Artifact 與 retry loop。</p>
           </div>
           <a href={ROADMAP_URL} target="_blank" rel="noreferrer">Open roadmap</a>
         </div>
@@ -384,7 +411,7 @@ function App() {
       <section className="agent-runtime-card">
         <div>
           <div className="panel-title"><Cpu size={18} /> Agent Runtime</div>
-          <p>{gateway.runtime.mode === 'sse' ? 'SSE gateway connected' : 'Local mock stream；設定 VITE_AI_GATEWAY_URL 後切換真實 SSE。'}</p>
+          <p>{gateway.runtime.mode === 'sse' ? 'SSE gateway connected' : 'Local mock stream；v0.3.1 支援 run → artifact 與 retry。'}</p>
           <small>{gateway.runtime.endpointLabel}</small>
         </div>
         <label>
@@ -497,6 +524,10 @@ function App() {
                 <b>{run.provider}/{run.model}</b>
                 <small>{run.status} · {run.startedAt}{run.completedAt ? ` → ${run.completedAt}` : ''}</small>
                 <p>{run.output || run.input}</p>
+                <div className="agent-run-actions">
+                  <button onClick={() => saveAgentRunAsArtifact(run)} disabled={syncStatus === 'loading'}><Archive size={13} /> Save artifact</button>
+                  <button onClick={() => retryAgentRun(run)} disabled={isStreaming || syncStatus === 'loading'}><RefreshCcw size={13} /> Retry</button>
+                </div>
               </article>
             ))}
           </section>
@@ -514,12 +545,13 @@ function App() {
       </section>
 
       <footer>
-        <Rocket size={16} /> {APP_VERSION}: Multi-model Agent、provider adapter、Agent Runs queue 已接入；Next: backend-hosted AI Gateway.
+        <Rocket size={16} /> {APP_VERSION}: Agent Runs 可一鍵保存為 Artifact 並支援 retry；Next: backend-hosted AI Gateway contract.
       </footer>
     </main>
   );
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
+
 
 

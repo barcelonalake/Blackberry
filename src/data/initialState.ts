@@ -44,7 +44,8 @@ export const initialState: WorkspaceState = {
     { id: 't2', title: '建立 Supabase migration draft', status: 'done', priority: 'high', sessionId: 's2' },
     { id: 't3', title: '實作手機版 Workspace Shell', status: 'in_progress', priority: 'high', sessionId: 's2' },
     { id: 't4', title: '接 AI Gateway SSE streaming', status: 'done', priority: 'medium', sessionId: 's1' },
-    { id: 't5', title: '建立 v0.3 provider adapter 與 agent run queue', status: 'in_progress', priority: 'high', sessionId: 's2' },
+    { id: 't5', title: '建立 v0.3 provider adapter 與 agent run queue', status: 'done', priority: 'high', sessionId: 's2' },
+    { id: 't6', title: 'v0.3.1 Agent Run 轉 Artifact 與 retry loop', status: 'in_progress', priority: 'high', sessionId: 's2' },
   ],
   agentRuns: [
     {
@@ -54,10 +55,11 @@ export const initialState: WorkspaceState = {
       model: 'gateway/mock-stream',
       status: 'completed',
       input: '建立 v0.3 agent runtime',
-      output: '已規劃 provider adapter、agent run queue、SSE fallback。',
+      output: '已規劃 provider adapter、agent run queue、SSE fallback；下一步把 run output 轉成可編輯 Artifact。',
       startedAt: '09:30',
       completedAt: '09:31',
     },
   ],
 };
+
 
