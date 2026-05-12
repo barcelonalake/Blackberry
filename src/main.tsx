@@ -19,21 +19,26 @@ import {
   Send,
   Sparkles,
   Smartphone,
+  UserRound,
   Workflow,
 } from 'lucide-react';
 import type { Memory, Message, Session, Task, WorkspaceState } from './domain/types';
 import { createWorkspaceRuntime } from './data/workspaceRepositoryFactory';
+import { createAuthRuntime, type AuthBootstrapSession } from './auth/authBootstrap';
 import { initialState } from './data/initialState';
 import { AIGatewayClient } from './services/aiGatewayClient';
 import './styles.css';
 
+const env = {
+  VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
+  VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY,
+};
+
 const runtime = createWorkspaceRuntime({
-  env: {
-    VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
-    VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY,
-  },
+  env,
   storage: window.localStorage,
 });
+const authRuntime = createAuthRuntime({ env, storage: window.localStorage });
 const repository = runtime.repository;
 const gateway = new AIGatewayClient();
 
@@ -48,8 +53,28 @@ function App() {
   const [draft, setDraft] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'loading' | 'synced' | 'saving' | 'error'>('loading');
+  const [authSession, setAuthSession] = useState<AuthBootstrapSession | null>(null);
+  const [authStatus, setAuthStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [syncError, setSyncError] = useState('');
   const stateRef = useRef(state);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function bootstrapAuth() {
+      try {
+        const session = await authRuntime.bootstrap.ensureSession();
+        if (cancelled) return;
+        setAuthSession(session);
+        setAuthStatus('ready');
+      } catch (error) {
+        if (cancelled) return;
+        setSyncError(String(error));
+        setAuthStatus('error');
+      }
+    }
+    bootstrapAuth();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,6 +198,20 @@ function App() {
     persist({ ...state, memories: [nextMemory, ...state.memories] });
   }
 
+  async function resetAuthIdentity() {
+    try {
+      setAuthStatus('loading');
+      await authRuntime.bootstrap.signOut();
+      const session = await authRuntime.bootstrap.ensureSession();
+      setAuthSession(session);
+      setAuthStatus('ready');
+      setSyncError('');
+    } catch (error) {
+      setAuthStatus('error');
+      setSyncError(String(error));
+    }
+  }
+
   return (
     <main className="workspace-shell">
       <header className="topbar">
@@ -188,6 +227,20 @@ function App() {
       </header>
 
       {syncStatus === 'error' && <section className="sync-error">Sync error: {syncError}</section>}
+      {authStatus === 'error' && <section className="sync-error">Auth error: {syncError}</section>}
+
+      <section className="auth-card">
+        <div className="panel-title"><UserRound size={18} /> Auth bootstrap</div>
+        <div>
+          <b>{authSession?.profile.displayName ?? 'Bootstrapping identity…'}</b>
+          <small>{authRuntime.label} · {authStatus}</small>
+        </div>
+        <div>
+          <b>{authSession?.workspace.name ?? 'Workspace pending'}</b>
+          <small>{authSession?.membership.role ?? 'member'} · {authSession?.workspace.slug ?? 'no-slug'}</small>
+        </div>
+        <button className="ghost compact" onClick={resetAuthIdentity} disabled={authStatus === 'loading'}>Refresh identity</button>
+      </section>
 
       <section className="metrics">
         {metrics.map(({ label, value, icon: Icon }) => <article key={label}><Icon size={18} /><strong>{value}</strong><span>{label}</span></article>)}
